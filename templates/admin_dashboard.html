@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Admin Dashboard</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial; background: #0a0e27; color: #fff; }
+    .navbar {
+      background: #1a1f3a;
+      padding: 15px 30px;
+      border-bottom: 1px solid #d4af37;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .nav-brand { font-size: 18px; color: #d4af37; font-weight: bold; }
+    .btn-red {
+      padding: 8px 16px;
+      background: #ff4560;
+      color: #fff;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    .container { max-width: 1200px; margin: 0 auto; padding: 30px; }
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 30px; }
+    .stat { background: #1a1f3a; border: 1px solid #333; padding: 20px; border-radius: 8px; }
+    .stat-label { font-size: 11px; color: #aaa; }
+    .stat-val { font-size: 24px; color: #d4af37; font-weight: bold; margin-top: 10px; }
+    .panel { background: #1a1f3a; border: 1px solid #333; padding: 20px; border-radius: 8px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 12px; text-align: left; border-bottom: 1px solid #333; }
+    th { background: rgba(212,175,55,0.1); color: #d4af37; }
+  </style>
+</head>
+<body>
+  <div class="navbar">
+    <div class="nav-brand">&#9881;&#65039; ADMIN DASHBOARD</div>
+    <button class="btn-red" onclick="logout()">Logout</button>
+  </div>
+
+  <div class="container">
+    <h1 style="margin-bottom: 20px;">System Status</h1>
+
+    <div class="stats" id="stats">
+      <div style="text-align: center; color: #aaa;">Loading...</div>
+    </div>
+
+    <div class="panel" style="margin-top: 20px;">
+      <h2 style="margin-bottom: 15px;">Recent Transactions</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>User</th>
+            <th>Type</th>
+            <th>Amount</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="txns">
+          <tr><td colspan="5" style="text-align: center; color: #aaa;">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    const api  = (url) => fetch(url, {credentials: 'same-origin'}).then(r => r.json());
+    const post = (u, b) => fetch(u, {method: 'POST', credentials: 'same-origin',
+                               headers: {'Content-Type': 'application/json'},
+                               body: JSON.stringify(b)}).then(r => r.json());
+    const fmt  = n => parseFloat(n || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+
+    async function load() {
+      const d = await api('/api/admin/stats');
+      if (!d.success) { window.location = '/admin'; return; }
+      const s = d.data;
+      document.getElementById('stats').innerHTML =
+        '<div class="stat"><div class="stat-label">Total Clients</div><div class="stat-val">' + (s.clients || 0) + '</div></div>' +
+        '<div class="stat"><div class="stat-label">Total Deposits</div><div class="stat-val">$' + fmt(s.deposits || 0) + '</div></div>' +
+        '<div class="stat"><div class="stat-label">Total Withdrawals</div><div class="stat-val">$' + fmt(s.withdrawals || 0) + '</div></div>';
+
+      const txs = await api('/api/admin/transactions');
+      const html = txs.data && txs.data.length
+        ? txs.data.slice(0, 20).map(t =>
+            '<tr>' +
+            '<td>' + (t.created_at || '').substring(0, 10) + '</td>' +
+            '<td>' + (t.user_name || '-') + '</td>' +
+            '<td>' + t.type + '</td>' +
+            '<td>$' + fmt(t.amount_usd) + '</td>' +
+            '<td>' + t.status + '</td>' +
+            '</tr>'
+          ).join('')
+        : '<tr><td colspan="5" style="text-align: center;">No transactions</td></tr>';
+      document.getElementById('txns').innerHTML = html;
+    }
+
+    async function logout() {
+      await post('/api/auth/logout', {});
+      window.location = '/admin';
+    }
+
+    load();
+  </script>
+</body>
+</html>

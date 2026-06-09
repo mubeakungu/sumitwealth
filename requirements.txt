@@ -2,3 +2,8 @@ flask
 flask-cors
 python-binance
 gunicorn
+gunicorn
+flask
+flask-cors
+python-binance
+python-dotenv

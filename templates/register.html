@@ -20,7 +20,7 @@
     input:focus { outline:none; border-color:#d4af37; }
     .btn { width:100%; padding:13px; background:#d4af37; color:#0a0e27; border:none; border-radius:5px; font-weight:bold; font-size:14px; cursor:pointer; margin-top:8px; }
     .btn:disabled { opacity:0.5; cursor:not-allowed; }
-    .error   { background:rgba(255,69,96,0.15); border:1px solid #ff4560; color:#ff4560; padding:10px; border-radius:5px; margin-bottom:14px; font-size:12px; display:none; }
+    .error { background:rgba(255,69,96,0.15); border:1px solid #ff4560; color:#ff4560; padding:10px; border-radius:5px; margin-bottom:14px; font-size:12px; display:none; word-break:break-word; }
     .error.show { display:block; }
     .links { margin-top:16px; text-align:center; font-size:12px; color:#555; }
     .links a { color:#d4af37; text-decoration:none; }
@@ -63,7 +63,6 @@
   </div>
 
   <script>
-    // Auto-read referral code from URL ?ref=XXXX
     const urlParams = new URLSearchParams(window.location.search);
     const refCode   = urlParams.get('ref') || '';
 
@@ -73,54 +72,68 @@
       banner.classList.add('show');
     }
 
-    async function register() {
-      const name     = document.getElementById('name').value.trim();
-      const email    = document.getElementById('email').value.trim();
-      const phone    = document.getElementById('phone').value.trim();
-      const password = document.getElementById('password').value;
-      const pin      = document.getElementById('pin').value;
-      const errEl    = document.getElementById('err');
-      const btn      = document.getElementById('regBtn');
-
-      errEl.classList.remove('show');
-
-      if (!name)              { showErr('Enter your full name');      return; }
-      if (!email)             { showErr('Enter your email');          return; }
-      if (password.length<6)  { showErr('Password min 6 characters'); return; }
-      if (pin.length!==6 || isNaN(pin)) { showErr('PIN must be exactly 6 digits'); return; }
-
-      btn.disabled    = true;
-      btn.textContent = 'Creating account...';
-
-      try {
-        const r = await fetch('/api/auth/register', {
-          method:'POST',
-          credentials:'same-origin',
-          headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({name, email, phone, password, pin, ref_code: refCode})
-        });
-        const d = await r.json();
-        if (d.success) {
-          btn.textContent = '&#9989; Redirecting...';
-          window.location.href = '/dashboard';
-        } else {
-          showErr(d.error || 'Registration failed');
-        }
-      } catch(e) {
-        showErr('Network error. Please try again.');
-      } finally {
-        btn.disabled    = false;
-        btn.textContent = 'Create Account';
-      }
-    }
-
     function showErr(msg) {
       const el = document.getElementById('err');
       el.textContent = msg;
       el.classList.add('show');
     }
 
-    document.addEventListener('keydown', e => { if(e.key==='Enter') register(); });
+    async function register() {
+      const name     = document.getElementById('name').value.trim();
+      const email    = document.getElementById('email').value.trim();
+      const phone    = document.getElementById('phone').value.trim();
+      const password = document.getElementById('password').value;
+      const pin      = document.getElementById('pin').value;
+      const btn      = document.getElementById('regBtn');
+
+      document.getElementById('err').classList.remove('show');
+
+      if (!name)                           { showErr('Enter your full name');              return; }
+      if (!email)                          { showErr('Enter your email');                  return; }
+      if (password.length < 6)             { showErr('Password must be min 6 characters'); return; }
+      if (pin.length !== 6 || isNaN(pin))  { showErr('PIN must be exactly 6 digits');      return; }
+
+      btn.disabled    = true;
+      btn.textContent = 'Creating account...';
+
+      // Step 1 — network
+      let response;
+      try {
+        response = await fetch('/api/auth/register', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ name, email, phone, password, pin, ref_code: refCode })
+        });
+      } catch (networkErr) {
+        showErr('Could not reach the server. Check your connection and try again.');
+        btn.disabled    = false;
+        btn.textContent = 'Create Account';
+        return;
+      }
+
+      // Step 2 — parse JSON (catches Flask 500 HTML error pages)
+      let data;
+      try {
+        data = await response.json();
+      } catch (jsonErr) {
+        showErr(`Server error (HTTP ${response.status}). Check Render logs for a Python traceback.`);
+        btn.disabled    = false;
+        btn.textContent = 'Create Account';
+        return;
+      }
+
+      // Step 3 — handle app-level result
+      if (data.success) {
+        btn.textContent = '&#9989; Redirecting...';
+        window.location.href = '/dashboard';
+      } else {
+        showErr(data.error || 'Registration failed. Please try again.');
+        btn.disabled    = false;
+        btn.textContent = 'Create Account';
+      }
+    }
+
+    document.addEventListener('keydown', e => { if (e.key === 'Enter') register(); });
   </script>
 </body>
 </html>

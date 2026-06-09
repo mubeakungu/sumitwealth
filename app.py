@@ -54,8 +54,8 @@ MANUAL_WALLETS = {
     "ERC20": os.environ.get("WALLET_ERC20", ""),
 }
 
-REFERRAL_COMMISSION_PCT = 0.20   # 20%
-REFERRAL_MIN_DEPOSIT    = 100.0  # trigger commission on $100+
+REFERRAL_COMMISSION_PCT = 0.20
+REFERRAL_MIN_DEPOSIT    = 100.0
 
 EMA_FAST        = 9
 EMA_SLOW        = 21
@@ -136,7 +136,7 @@ CREATE TABLE IF NOT EXISTS trades (
 """)
         db.commit()
 
-        # Safe migrations for existing databases
+        # Safe migrations
         for col, tbl, defval in [
             ("referral_code", "users",    "''"),
             ("referred_by",   "users",    "NULL"),
@@ -220,47 +220,33 @@ def admin_required(f):
 
 # ── REFERRAL ENGINE ───────────────────────────────────────────────────────────
 def process_referral_commission(tx_id: str, user_id: str, amount_usd: float):
-    """
-    Called after admin approves a deposit.
-    If this user was referred AND this is their first completed deposit >= $100,
-    credit the referrer 20% into their ref_balance (withdrawable as USDT).
-    """
     if amount_usd < REFERRAL_MIN_DEPOSIT:
         return
-
     with get_db() as db:
         user = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
         if not user or not user["referred_by"]:
-            return  # Not referred by anyone
-
-        # Only pay once per referred user
+            return
         already_paid = db.execute(
             "SELECT id FROM referrals WHERE referred_id=?", (user_id,)
         ).fetchone()
         if already_paid:
             return
-
         referrer = db.execute(
             "SELECT * FROM users WHERE id=?", (user["referred_by"],)
         ).fetchone()
         if not referrer:
             return
-
         commission = round(amount_usd * REFERRAL_COMMISSION_PCT, 2)
-
-        # Record referral
         db.execute(
             "INSERT INTO referrals(id,referrer_id,referred_id,commission_usd,"
             "status,triggered_by,created_at) VALUES(?,?,?,?,'CREDITED',?,?)",
             (_uid(), referrer["id"], user_id, commission, tx_id, _now())
         )
-        # Credit referrer's ref_balance
         db.execute(
             "UPDATE accounts SET ref_balance=ref_balance+? WHERE user_id=?",
             (commission, referrer["id"])
         )
         db.commit()
-
         log.info(
             f"Referral commission: {referrer['name']} credited "
             f"${commission} for referring {user['name']}"
@@ -281,7 +267,7 @@ def get_trend(client, symbol):
         closes = [float(k[4]) for k in klines]
         fast = _ema(closes, EMA_FAST)
         slow = _ema(closes, EMA_SLOW)
-        if fast > slow * 1.001:  return "UP"
+        if fast > slow * 1.001:   return "UP"
         elif fast < slow * 0.999: return "DOWN"
         return "NEUTRAL"
     except:
@@ -322,7 +308,6 @@ def trade_bot_loop(stop_event):
                     open_trades = db.execute(
                         "SELECT * FROM trades WHERE status='OPEN'"
                     ).fetchall()
-
                 if open_trades:
                     syms = set(t["symbol"] for t in open_trades)
                     prices, trends = {}, {}
@@ -332,19 +317,15 @@ def trade_bot_loop(stop_event):
                             trends[sym] = get_trend(bnb, sym)
                         except:
                             pass
-
                     with get_db() as db:
                         for trade in open_trades:
                             sym   = trade["symbol"]
                             price = prices.get(sym)
                             trend = trends.get(sym, "NEUTRAL")
                             if not price: continue
-
                             d  = trade["direction"]
                             sl = trade["stop_loss"]
                             tp = trade["take_profit"]
-
-                            # Stop loss
                             if (d == "BUY" and price <= sl) or (d == "SELL" and price >= sl):
                                 _close_trade(db, trade, price, "STOP_LOSS")
                                 new_dir = None
@@ -355,8 +336,6 @@ def trade_bot_loop(stop_event):
                                                 sym, new_dir, price, trade["quantity"])
                                 db.commit()
                                 continue
-
-                            # Take profit
                             if (d == "BUY" and price >= tp) or (d == "SELL" and price <= tp):
                                 _close_trade(db, trade, price, "TAKE_PROFIT")
                                 if (d == "BUY" and trend == "UP") or (d == "SELL" and trend == "DOWN"):
@@ -364,18 +343,14 @@ def trade_bot_loop(stop_event):
                                                 sym, d, price, trade["quantity"])
                                 db.commit()
                                 continue
-
-                            # Trend reversal
                             if (d == "BUY" and trend == "DOWN") or (d == "SELL" and trend == "UP"):
                                 _close_trade(db, trade, price, "TREND_REVERSAL")
                                 _open_trade(db, trade["user_id"], trade["account_id"],
                                             sym, "SELL" if d == "BUY" else "BUY",
                                             price, trade["quantity"])
                                 db.commit()
-
             except Exception as e:
                 log.error(f"Trade bot error: {e}")
-
         stop_event.wait(CHECK_INTERVAL)
     log.info("Trade bot stopped")
 
@@ -419,7 +394,6 @@ def api_register():
 
     try:
         with get_db() as db:
-            # Resolve referral code
             referred_by = None
             if ref:
                 referrer = db.execute(
@@ -506,11 +480,11 @@ def client_summary():
 
     return ok({
         "name":              u["name"],
-        "balance":           a["balance"]     if a else 0,
-        "equity":            a["equity"]      if a else 0,
+        "balance":           a["balance"]       if a else 0,
+        "equity":            a["equity"]        if a else 0,
         "total_deposits":    dep["s"],
         "total_withdrawals": wdr["s"],
-        "ref_balance":       a["ref_balance"] if a else 0,
+        "ref_balance":       a["ref_balance"]   if a else 0,
         "ref_code":          u["referral_code"] or "",
         "ref_count":         ref_count["c"],
         "ref_earned":        ref_earned["s"],
@@ -533,16 +507,13 @@ def client_referrals():
 @app.route("/api/client/referral/withdraw", methods=["POST"])
 @login_required
 def client_referral_withdraw():
-    """
-    Withdraw referral balance as USDT via Binance to client's wallet.
-    """
-    d     = request.json or {}
-    uid   = session["user_id"]
-    pin   = d.get("pin", "")
-    addr  = d.get("address", "").strip()
-    net   = d.get("network", "TRC20").upper()
+    d   = request.json or {}
+    uid = session["user_id"]
+    pin = d.get("pin", "")
+    addr = d.get("address", "").strip()
+    net  = d.get("network", "TRC20").upper()
 
-    if not addr:          return err("Enter your USDT wallet address")
+    if not addr:            return err("Enter your USDT wallet address")
     if net not in NETWORKS: return err("Invalid network")
 
     with get_db() as db:
@@ -556,7 +527,6 @@ def client_referral_withdraw():
         if ref_bal < 10:
             return err("Minimum referral withdrawal is $10")
 
-        # Send via Binance if available
         bid    = ""
         status = "PENDING"
         if bnb:
@@ -573,7 +543,6 @@ def client_referral_withdraw():
             except Exception as e:
                 return err(f"Binance withdrawal error: {str(e)}", 502)
 
-        # Deduct ref_balance
         db.execute(
             "UPDATE accounts SET ref_balance=0 WHERE user_id=?", (uid,)
         )
@@ -672,8 +641,8 @@ def client_withdraw():
     addr = d.get("address", "").strip()
     pin  = d.get("pin", "")
 
-    if amt < 1000:         return err("Minimum withdrawal is $1,000")
-    if not addr:           return err("Enter withdrawal address")
+    if amt < 1000:          return err("Minimum withdrawal is $1,000")
+    if not addr:            return err("Enter withdrawal address")
     if net not in NETWORKS: return err("Invalid network")
 
     with get_db() as db:
@@ -754,8 +723,8 @@ def admin_approve_deposit():
 
     with get_db() as db:
         tx = db.execute("SELECT * FROM transactions WHERE id=?", (txid,)).fetchone()
-        if not tx:                   return err("Transaction not found")
-        if tx["type"] != "DEPOSIT":  return err("Not a deposit")
+        if not tx:                    return err("Transaction not found")
+        if tx["type"] != "DEPOSIT":   return err("Not a deposit")
         if tx["status"] != "PENDING": return err(f"Already {tx['status']}")
 
         db.execute(
@@ -768,7 +737,6 @@ def admin_approve_deposit():
         )
         db.commit()
 
-    # Process referral commission in background thread
     threading.Thread(
         target=process_referral_commission,
         args=(txid, tx["user_id"], tx["amount_usd"]),
@@ -879,10 +847,10 @@ def admin_trades():
             ).fetchall()
     return ok([dict(r) for r in rows])
 
-# ── ENTRY POINT ───────────────────────────────────────────────────────────────
-if __name__ == "__main__":
-    init_db()
+# ── INIT & ENTRY POINT ────────────────────────────────────────────────────────
+init_db()  # Always runs — works with both gunicorn and python app.py
 
+if __name__ == "__main__":
     _bot_stop   = threading.Event()
     _bot_thread = threading.Thread(
         target=trade_bot_loop, args=(_bot_stop,),

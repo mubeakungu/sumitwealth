@@ -3,6 +3,7 @@ Summit Wealth v5 - BINANCE ONLY + REFERRAL SYSTEM
 - Referral code per client (20% commission on first $100+ deposit)
 - Referral earnings withdrawable as USDT via Binance
 - No M-Pesa
+- Proxy support for Binance API (bypass geo-restrictions)
 """
 
 import os, sqlite3, hashlib, secrets, datetime, uuid, logging, threading
@@ -35,11 +36,40 @@ log = logging.getLogger("summit")
 # ── BINANCE ───────────────────────────────────────────────────────────────────
 api_key    = os.environ.get("BINANCE_API_KEY")
 api_secret = os.environ.get("BINANCE_API_SECRET")
-try:
-    bnb = Client(api_key, api_secret) if (BINANCE_AVAILABLE and api_key and api_secret) else None
-except Exception as e:
-    logging.warning(f"Binance connection failed: {e}")
-    bnb = None
+
+# Proxy config (set these in Render environment variables)
+proxy_host = os.environ.get("PROXY_HOST", "")
+proxy_port = os.environ.get("PROXY_PORT", "")
+proxy_user = os.environ.get("PROXY_USER", "")
+proxy_pass = os.environ.get("PROXY_PASS", "")
+
+def make_binance_client():
+    if not (BINANCE_AVAILABLE and api_key and api_secret):
+        log.warning("Binance: API keys not configured")
+        return None
+    try:
+        if proxy_host and proxy_port:
+            if proxy_user and proxy_pass:
+                proxy_url = f"http://{proxy_user}:{proxy_pass}@{proxy_host}:{proxy_port}"
+            else:
+                proxy_url = f"http://{proxy_host}:{proxy_port}"
+            requests_params = {
+                "proxies": {
+                    "http":  proxy_url,
+                    "https": proxy_url,
+                }
+            }
+            client = Client(api_key, api_secret, requests_params=requests_params)
+            log.info(f"Binance connected via proxy {proxy_host}:{proxy_port} ✓")
+        else:
+            client = Client(api_key, api_secret)
+            log.info("Binance connected directly ✓")
+        return client
+    except Exception as e:
+        log.warning(f"Binance connection failed: {e}")
+        return None
+
+bnb = make_binance_client()
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 DB_PATH  = os.path.join(os.path.dirname(__file__), "summit.db")
@@ -594,16 +624,21 @@ def client_deposit_address():
     net = request.args.get("network", "TRC20").upper()
     if net not in NETWORKS: return err("Invalid network")
 
+    # Try Binance API first (via proxy if configured)
     if bnb:
         try:
             addr = bnb.get_deposit_address(coin="USDT", network=NETWORKS[net]["network"])
-            return ok({"address": addr["address"], "network": net, "mode": "auto"})
+            if addr and addr.get("address"):
+                log.info(f"Deposit address fetched via Binance API (proxy={'yes' if proxy_host else 'no'})")
+                return ok({"address": addr["address"], "network": net, "mode": "auto"})
         except Exception as e:
-            log.warning(f"Binance deposit address failed: {e}")
+            log.warning(f"Binance deposit address failed (will try manual wallet): {e}")
 
+    # Fallback to manual wallet
     wallet = MANUAL_WALLETS.get(net, "")
     if not wallet:
         return err("Deposit address not configured. Contact support.")
+    log.info(f"Deposit address served from manual wallet config for {net}")
     return ok({"address": wallet, "network": net, "mode": "manual"})
 
 @app.route("/api/client/deposit/pending", methods=["POST"])
@@ -847,6 +882,18 @@ def admin_trades():
             ).fetchall()
     return ok([dict(r) for r in rows])
 
+# ── PROXY STATUS (Admin debug endpoint) ──────────────────────────────────────
+@app.route("/api/admin/proxy/status")
+@admin_required
+def admin_proxy_status():
+    return ok({
+        "binance_connected": bnb is not None,
+        "proxy_configured":  bool(proxy_host and proxy_port),
+        "proxy_host":        proxy_host or "not set",
+        "proxy_port":        proxy_port or "not set",
+        "proxy_auth":        bool(proxy_user and proxy_pass),
+    })
+
 # ── INIT & ENTRY POINT ────────────────────────────────────────────────────────
 init_db()  # Always runs — works with both gunicorn and python app.py
 
@@ -859,12 +906,13 @@ if __name__ == "__main__":
     _bot_thread.start()
 
     print("\n" + "="*55)
-    print("   Summit Wealth v5 — BINANCE + REFERRAL EDITION")
+    print("   Summit Wealth v5 — BINANCE + REFERRAL + PROXY")
     print("="*55)
     print(f"   http://127.0.0.1:8080")
     print(f"   Client : john@test.com  / demo1234")
     print(f"   Admin  : admin@test.com / admin1234")
-    print(f"   Binance: {'CONNECTED ✓' if bnb else 'NOT configured (set BINANCE_API_KEY)'}")
+    print(f"   Binance: {'CONNECTED ✓' if bnb else 'NOT configured'}")
+    print(f"   Proxy  : {proxy_host+':'+proxy_port if proxy_host else 'NOT configured'}")
     print(f"   Referral: 20% commission, paid as USDT via Binance")
     print("="*55 + "\n")
 

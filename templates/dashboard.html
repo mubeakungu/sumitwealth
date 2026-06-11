@@ -84,6 +84,8 @@
     .badge-pending   { background:rgba(255,200,0,0.15);  color:#ffc800; }
     .badge-completed { background:rgba(0,224,144,0.15);  color:#00e090; }
     .badge-rejected  { background:rgba(255,69,96,0.15);  color:#ff4560; }
+    .badge-open      { background:rgba(0,136,255,0.15);  color:#0088ff; }
+    .badge-closed    { background:rgba(150,150,150,0.15); color:#aaa; }
     .type-deposit    { color:#00e090; font-weight:bold; }
     .type-withdrawal { color:#ff4560; font-weight:bold; }
     .type-ref        { color:#d4af37; font-weight:bold; }
@@ -210,7 +212,8 @@
   <div class="tabs">
     <button class="tab active"  onclick="switchTab(event,'deposit')">&#8593; Deposit USDT</button>
     <button class="tab"         onclick="switchTab(event,'withdraw')">&#8595; Withdraw USDT</button>
-    <button class="tab"         onclick="switchTab(event,'history')">&#9776; History</button>
+    <button class="tab"         onclick="switchTab(event,'history')">&#9776; Transactions</button>
+    <button class="tab"         onclick="switchTab(event,'trades')">&#128200; Trades</button>
     <button class="tab" id="refTab" onclick="switchTab(event,'referral')">&#127381; Referral <span id="refBadge" style="display:none; background:#00e090; color:#0a0e27; border-radius:20px; padding:1px 7px; font-size:10px; margin-left:4px;"></span></button>
   </div>
 
@@ -286,11 +289,19 @@
     </div>
   </div>
 
-  <!-- HISTORY TAB -->
+  <!-- TRANSACTIONS TAB -->
   <div id="history" class="tab-content">
     <div class="panel panel-wide">
       <h2>Transaction History</h2>
       <div id="historyList" style="color:#aaa; padding:20px 0;">Loading...</div>
+    </div>
+  </div>
+
+  <!-- TRADES TAB -->
+  <div id="trades" class="tab-content">
+    <div class="panel panel-wide">
+      <h2>&#128200; My Trades</h2>
+      <div id="tradesList" style="color:#aaa; padding:20px 0;">Loading...</div>
     </div>
   </div>
 
@@ -567,8 +578,9 @@
     document.querySelectorAll('.tab').forEach(el=>el.classList.remove('active'));
     document.getElementById(name).classList.add('show');
     e.currentTarget.classList.add('active');
-    if(name==='history')  loadHistory();
-    if(name==='referral') loadReferralHistory();
+    if(name==='history')   loadHistory();
+    if(name==='trades')    loadClientTrades();
+    if(name==='referral')  loadReferralHistory();
   }
   function switchTabByName(name){
     document.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('show'));
@@ -654,6 +666,35 @@
     });
     html+='</tbody></table>';
     document.getElementById('historyList').innerHTML=html;
+  }
+
+  // ── TRADES ───────────────────────────────────────────────────────────────────
+  async function loadClientTrades(){
+    document.getElementById('tradesList').innerHTML='<div style="color:#aaa; padding:20px 0;">Loading...</div>';
+    const d=await api('/api/client/trades');
+    const list=document.getElementById('tradesList');
+    if(!d.success||!d.data||!d.data.length){
+      list.innerHTML='<p style="color:#555; padding:20px 0;">No trades yet.</p>';
+      return;
+    }
+    let html='<table class="tbl"><thead><tr><th>Opened</th><th>Symbol</th><th>Direction</th><th>Entry Price</th><th>Close Price</th><th>Quantity</th><th>P&amp;L</th><th>Status</th><th>Close Reason</th></tr></thead><tbody>';
+    d.data.forEach(t=>{
+      const pnlColor=(t.pnl||0)>=0?'#00e090':'#ff4560';
+      const dirColor=t.direction==='BUY'?'#00e090':'#ff4560';
+      html+=`<tr>
+        <td style="color:#aaa;font-size:11px;">${(t.opened_at||'').substring(0,16).replace('T',' ')}</td>
+        <td style="color:#d4af37;font-weight:bold;">${t.symbol||'—'}</td>
+        <td style="color:${dirColor};font-weight:bold;">${t.direction||'—'}</td>
+        <td>$${fmt(t.entry_price)}</td>
+        <td>${t.close_price?'$'+fmt(t.close_price):'<span style="color:#555">Open</span>'}</td>
+        <td style="color:#aaa;">${fmt(t.quantity)}</td>
+        <td style="color:${pnlColor};font-weight:bold;">${t.pnl!=null?(t.pnl>=0?'+':'')+fmt(t.pnl):'—'}</td>
+        <td><span class="badge ${t.status==='OPEN'?'badge-open':'badge-closed'}">${t.status}</span></td>
+        <td style="color:#555;font-size:11px;">${t.close_reason||'—'}</td>
+      </tr>`;
+    });
+    html+='</tbody></table>';
+    list.innerHTML=html;
   }
 
   // ── REFERRAL HISTORY ─────────────────────────────────────────────────────────

@@ -161,6 +161,7 @@ CREATE TABLE IF NOT EXISTS daily_trade_log (
     created_at TEXT
 );
 """)
+    conn.commit()  # commit table creation before running any queries
 
     # Safe migrations — add columns if they don't exist
     for col, tbl, defval in [

@@ -670,7 +670,7 @@ def client_deposit_pending():
     amt  = float(d.get("amount", 0))
     net  = d.get("network","TRC20").upper()
     addr = d.get("address","").strip()
-    if amt < 100: return err("Minimum deposit is $100")
+    if amt < 10: return err("Minimum deposit is $10")
     if not addr:  return err("Deposit address is required")
     with get_db() as db:
         acct = db.execute("SELECT id FROM accounts WHERE user_id=?", (uid,)).fetchone()

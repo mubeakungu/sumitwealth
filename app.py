@@ -59,7 +59,10 @@ def make_binance_client():
 bnb = make_binance_client()
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
-DATABASE_URL        = os.environ.get("DATABASE_URL", "")
+DATABASE_URL = os.environ.get("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL environment variable is not set! Add it in Render → your web service → Environment.")
+
 DAILY_PROFIT        = float(os.environ.get("DAILY_PROFIT_USD", "8.0"))
 MIN_BALANCE         = float(os.environ.get("MIN_BALANCE", "10.0"))
 TRADE_HOUR          = int(os.environ.get("TRADE_HOUR", "8"))   # 8am UTC = 11am EAT
@@ -219,6 +222,7 @@ CREATE TABLE IF NOT EXISTS daily_trade_log (
 
     cur.close()
     conn.close()
+    log.info("Database initialised ✓")
 
 # ── HELPERS ───────────────────────────────────────────────────────────────────
 def _hash(s):  return hashlib.sha256(str(s).encode()).hexdigest()

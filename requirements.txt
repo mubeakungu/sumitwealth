@@ -7,3 +7,4 @@ flask
 flask-cors
 python-binance
 python-dotenv
+psycopg2-binary

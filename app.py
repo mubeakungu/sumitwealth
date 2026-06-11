@@ -878,6 +878,28 @@ def admin_trade_log():
         ).fetchall()
     return ok([dict(r) for r in rows])
 
+@app.route("/api/admin/trades")
+@admin_required
+def admin_trades():
+    """Return all trades with user info — filters by status."""
+    status = request.args.get("status", "").upper()
+    with get_db() as db:
+        if status:
+            trades = db.execute(
+                "SELECT t.*, u.name AS user_name FROM trades t "
+                "JOIN users u ON t.user_id=u.id "
+                "WHERE t.status=? "
+                "ORDER BY t.opened_at DESC",
+                (status,)
+            ).fetchall()
+        else:
+            trades = db.execute(
+                "SELECT t.*, u.name AS user_name FROM trades t "
+                "JOIN users u ON t.user_id=u.id "
+                "ORDER BY t.opened_at DESC"
+            ).fetchall()
+    return ok([dict(t) for t in trades])
+
 @app.route("/api/admin/referrals")
 @admin_required
 def admin_referrals():

@@ -1,11 +1,13 @@
 """
-Summit Wealth v5.2 - ONE TRADE PER DAY = $8 PROFIT
+Summit Wealth v5.3 - ONE TRADE PER DAY = $8 PROFIT
 - Scheduler starts at module level (works with gunicorn on Render)
 - One controlled trade per client per day
 - Trade targets exactly $8 profit then closes
 - Realistic trade using real Binance prices
 - Referral system: 20% commission
 - Manual wallet for deposits
+- Min deposit: $10
+- Withdrawal deducted only on admin approval
 """
 
 import os, sqlite3, hashlib, secrets, datetime, uuid, logging, threading, random
@@ -73,7 +75,7 @@ MANUAL_WALLETS = {
 }
 
 REFERRAL_COMMISSION_PCT = 0.20
-REFERRAL_MIN_DEPOSIT    = 100.0
+REFERRAL_MIN_DEPOSIT    = 10.0   # lowered from 100.0
 
 # ── DATABASE ──────────────────────────────────────────────────────────────────
 def get_db():
@@ -266,14 +268,11 @@ def run_daily_trades():
     today = _today()
     log.info(f"=== Daily trade run: {today} — target ${DAILY_PROFIT} profit/client ===")
 
-    # Get live or fallback price
     price = get_live_price(TRADE_SYMBOL)
 
-    # Slightly vary close price (+0.3% to +0.5%) to look realistic
     pct_gain    = random.uniform(0.003, 0.005)
     close_price = round(price * (1 + pct_gain), 2)
 
-    # quantity = desired_profit / price_difference
     price_diff = close_price - price
     if price_diff <= 0:
         log.error("Price diff is zero — cannot compute quantity. Aborting.")
@@ -295,7 +294,6 @@ def run_daily_trades():
         paid = 0
 
         for c in clients:
-            # Skip if already traded today
             already = db.execute(
                 "SELECT id FROM daily_trade_log WHERE user_id=? AND date=?",
                 (c["id"], today)
@@ -305,16 +303,14 @@ def run_daily_trades():
                 continue
 
             now = datetime.datetime.utcnow()
-            # Trade opened 30-90 minutes ago, closed just now (realistic look)
             open_minutes_ago = random.randint(30, 90)
             opened_at = (now - datetime.timedelta(minutes=open_minutes_ago)).isoformat()
             closed_at = now.isoformat()
 
             trade_id = _uid()
-            sl = round(price * 0.985, 2)   # stop loss 1.5% below entry
+            sl = round(price * 0.985, 2)
             tp = close_price
 
-            # Insert the closed trade
             db.execute(
                 "INSERT INTO trades(id,user_id,account_id,symbol,direction,"
                 "entry_price,quantity,stop_loss,take_profit,close_price,"
@@ -326,13 +322,11 @@ def run_daily_trades():
                  opened_at, closed_at)
             )
 
-            # Credit $8 to balance and equity
             db.execute(
                 "UPDATE accounts SET balance=balance+?, equity=equity+? WHERE user_id=?",
                 (DAILY_PROFIT, DAILY_PROFIT, c["id"])
             )
 
-            # Log the daily trade
             db.execute(
                 "INSERT INTO daily_trade_log(id,user_id,account_id,trade_id,"
                 "profit,date,created_at) VALUES(?,?,?,?,?,?,?)",
@@ -347,16 +341,12 @@ def run_daily_trades():
         db.commit()
         log.info(f"=== Daily trade complete: {paid}/{len(clients)} clients credited ${DAILY_PROFIT} ===")
 
-# ── SCHEDULER (module-level — works with gunicorn) ────────────────────────────
+# ── SCHEDULER ─────────────────────────────────────────────────────────────────
 _scheduler_lock      = threading.Lock()
 _scheduler_started   = False
 _scheduler_stop      = threading.Event()
 
 def trade_scheduler(stop_event):
-    """
-    Background thread that fires run_daily_trades() once per day
-    at TRADE_HOUR UTC. Safe to run under gunicorn workers.
-    """
     log.info(
         f"Trade scheduler started — fires daily at "
         f"{TRADE_HOUR:02d}:00 UTC ({TRADE_HOUR+3:02d}:00 EAT)"
@@ -383,7 +373,6 @@ def trade_scheduler(stop_event):
 
 
 def start_scheduler():
-    """Start scheduler once — safe to call multiple times."""
     global _scheduler_started
     with _scheduler_lock:
         if _scheduler_started:
@@ -670,8 +659,11 @@ def client_deposit_pending():
     amt  = float(d.get("amount", 0))
     net  = d.get("network","TRC20").upper()
     addr = d.get("address","").strip()
-    if amt < 10: return err("Minimum deposit is $10")
+
+    # ── CHANGED: minimum deposit is now $10 ──────────────────────────────────
+    if amt < 10:  return err("Minimum deposit is $10")
     if not addr:  return err("Deposit address is required")
+
     with get_db() as db:
         acct = db.execute("SELECT id FROM accounts WHERE user_id=?", (uid,)).fetchone()
         ref  = "SWC-" + secrets.token_hex(4).upper()
@@ -695,18 +687,18 @@ def client_withdraw():
     net  = d.get("network","TRC20").upper()
     addr = d.get("address","").strip()
     pin  = d.get("pin","")
+
     if amt < 1000:          return err("Minimum withdrawal is $1,000")
     if not addr:            return err("Enter withdrawal address")
     if net not in NETWORKS: return err("Invalid network")
+
     with get_db() as db:
         u = db.execute("SELECT pin_hash FROM users WHERE id=?", (uid,)).fetchone()
         a = db.execute("SELECT * FROM accounts WHERE user_id=?", (uid,)).fetchone()
         if not a or a["balance"] < amt: return err("Insufficient balance")
         if u["pin_hash"] and u["pin_hash"] != _hash(pin): return err("Invalid PIN", 403)
-        db.execute(
-            "UPDATE accounts SET balance=balance-?,equity=equity-? WHERE user_id=?",
-            (amt, amt, uid)
-        )
+
+        # ── CHANGED: do NOT deduct balance here — deduct on admin approval ───
         ref = "WD-" + secrets.token_hex(4).upper()
         db.execute(
             "INSERT INTO transactions(id,user_id,account_id,type,method,amount_usd,"
@@ -819,8 +811,33 @@ def admin_approve_withdrawal():
             "UPDATE transactions SET status='COMPLETED',completed_at=? WHERE id=?",
             (_now(), txid)
         )
+        # ── CHANGED: deduct balance here on approval, not on submission ──────
+        db.execute(
+            "UPDATE accounts SET balance=balance-?,equity=equity-? WHERE user_id=?",
+            (tx["amount_usd"], tx["amount_usd"], tx["user_id"])
+        )
         db.commit()
     return ok({"message": "Withdrawal marked complete"})
+
+@app.route("/api/admin/withdrawal/reject", methods=["POST"])
+@admin_required
+def admin_reject_withdrawal():
+    # ── NEW: reject a pending withdrawal without touching the balance ─────────
+    d      = request.json or {}
+    txid   = d.get("tx_id","").strip()
+    reason = d.get("reason","Rejected by admin")
+    with get_db() as db:
+        tx = db.execute("SELECT * FROM transactions WHERE id=?", (txid,)).fetchone()
+        if (not tx
+                or tx["type"] not in ("WITHDRAWAL","REFERRAL_WITHDRAWAL")
+                or tx["status"] != "PENDING"):
+            return err("Pending withdrawal not found")
+        db.execute(
+            "UPDATE transactions SET status='REJECTED',note=?,completed_at=? WHERE id=?",
+            (reason, _now(), txid)
+        )
+        db.commit()
+    return ok({"message": "Withdrawal rejected — client balance unchanged"})
 
 @app.route("/api/admin/clients")
 @admin_required
@@ -864,7 +881,6 @@ def admin_adjust_balance(uid):
 @app.route("/api/admin/trade/run", methods=["POST"])
 @admin_required
 def admin_run_trades():
-    """Manually trigger daily trades from admin panel."""
     threading.Thread(target=run_daily_trades, daemon=True).start()
     return ok({"message": f"Daily trades triggered — ${DAILY_PROFIT} profit per active client"})
 
@@ -881,7 +897,6 @@ def admin_trade_log():
 @app.route("/api/admin/trades")
 @admin_required
 def admin_trades():
-    """Return all trades with user info — filters by status."""
     status = request.args.get("status", "").upper()
     with get_db() as db:
         if status:
@@ -933,20 +948,19 @@ def scheduler_status():
     })
 
 # ── STARTUP ───────────────────────────────────────────────────────────────────
-# init_db and start_scheduler are called at module level so gunicorn
-# workers pick them up automatically — no __main__ guard needed.
 init_db()
 start_scheduler()
 
 if __name__ == "__main__":
     print("\n" + "="*60)
-    print("   Summit Wealth v5.2 — ONE TRADE/DAY = $8 PROFIT")
+    print("   Summit Wealth v5.3 — ONE TRADE/DAY = $8 PROFIT")
     print("="*60)
     print(f"   URL    : http://127.0.0.1:8080")
     print(f"   Client : john@test.com  / demo1234")
     print(f"   Admin  : admin@test.com / admin1234")
     print(f"   Profit : ${DAILY_PROFIT}/day at {TRADE_HOUR:02d}:00 UTC ({TRADE_HOUR+3:02d}:00 EAT)")
     print(f"   Symbol : {TRADE_SYMBOL}")
+    print(f"   Min Dep: $10")
     print(f"   Binance: {'CONNECTED ✓' if bnb else 'fallback prices'}")
     print(f"   TRC20  : {'SET ✓' if MANUAL_WALLETS['TRC20'] else 'NOT SET ✗'}")
     print("="*60 + "\n")

@@ -1,4 +1,4 @@
-cat > /mnt/user-data/outputs/app.py << 'PYEOF'
+
 """
 Summit Wealth v5.5 - $8 PROFIT PER $100 BALANCE (8% daily)
 - Scheduler starts at module level (works with gunicorn on Render)

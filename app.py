@@ -6,7 +6,7 @@ Summit Wealth v5.3 - ONE TRADE PER DAY = $8 PROFIT
 - Realistic trade using real Binance prices
 - Referral system: 20% commission
 - Manual wallet for deposits
-- Min deposit: $10
+- Min deposit: $100
 - Withdrawal deducted only on admin approval
 - Database: PostgreSQL (psycopg2)
 """
@@ -64,7 +64,7 @@ if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL environment variable is not set! Add it in Render → your web service → Environment.")
 
 DAILY_PROFIT        = float(os.environ.get("DAILY_PROFIT_USD", "8.0"))
-MIN_BALANCE         = float(os.environ.get("MIN_BALANCE", "10.0"))
+MIN_BALANCE         = float(os.environ.get("MIN_BALANCE", "100.0"))
 TRADE_HOUR          = int(os.environ.get("TRADE_HOUR", "5"))   # 8am UTC = 11am EAT
 TRADE_SYMBOL        = os.environ.get("TRADE_SYMBOL", "BTCUSDT")
 CHECK_INTERVAL      = 60   # seconds between scheduler ticks
@@ -81,7 +81,7 @@ MANUAL_WALLETS = {
 }
 
 REFERRAL_COMMISSION_PCT = 0.20
-REFERRAL_MIN_DEPOSIT    = 10.0
+REFERRAL_MIN_DEPOSIT    = 100.0
 
 # ── DATABASE ──────────────────────────────────────────────────────────────────
 def get_db():

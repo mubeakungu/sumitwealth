@@ -1066,7 +1066,7 @@ if __name__ == "__main__":
     print(f"   Admin  : admin@test.com / admin1234")
     print(f"   Profit : ${DAILY_PROFIT}/day at {TRADE_HOUR:02d}:00 UTC ({TRADE_HOUR+3:02d}:00 EAT)")
     print(f"   Symbol : {TRADE_SYMBOL}")
-    print(f"   Min Dep: $10")
+    print(f"   Min Dep: $100")
     print(f"   Binance: {'CONNECTED ✓' if bnb else 'fallback prices'}")
     print(f"   TRC20  : {'SET ✓' if MANUAL_WALLETS['TRC20'] else 'NOT SET ✗'}")
     print("="*60 + "\n")

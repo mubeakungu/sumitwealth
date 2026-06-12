@@ -25,13 +25,13 @@
     .tabs { display:flex; gap:5px; margin-bottom:20px; flex-wrap:wrap; }
     .tab  { padding:10px 20px; background:#1a1f3a; border:1px solid #333; cursor:pointer; color:#aaa; border-radius:5px; font-size:13px; }
     .tab.active { background:#d4af37; color:#0a0e27; font-weight:bold; border-color:#d4af37; }
-    .panel { background:#1a1f3a; border:1px solid #2a2f4a; padding:22px; border-radius:8px; }
+    .panel { background:#1a1f3a; border:1px solid #2a2f4a; padding:22px; border-radius:8px; overflow-x:auto; }
     .tab-content { display:none; }
     .tab-content.show { display:block; }
     .panel-title { font-size:15px; font-weight:bold; color:#d4af37; margin-bottom:18px; }
     .tbl { width:100%; border-collapse:collapse; font-size:12px; }
     .tbl th { padding:10px 12px; text-align:left; color:#d4af37; background:rgba(212,175,55,0.08); border-bottom:1px solid #333; white-space:nowrap; }
-    .tbl td { padding:10px 12px; border-bottom:1px solid #1e2440; vertical-align:middle; }
+    .tbl td { padding:10px 12px; border-bottom:1px solid #1e2440; vertical-align:middle; white-space:nowrap; }
     .tbl tr:hover td { background:rgba(255,255,255,0.02); }
     .badge { display:inline-block; padding:2px 8px; border-radius:20px; font-size:10px; font-weight:bold; text-transform:uppercase; }
     .badge-pending   { background:rgba(255,200,0,0.15);   color:#ffc800; }
@@ -66,6 +66,10 @@
     .chart-subtitle { font-size:11px; color:#666; margin-bottom:14px; }
     .empty   { text-align:center; padding:40px 20px; color:#555; font-size:13px; }
     .loading { text-align:center; padding:30px; color:#aaa; font-size:13px; }
+    /* client summary row under the table */
+    .client-totals { display:flex; gap:18px; flex-wrap:wrap; margin-top:16px; padding-top:14px; border-top:1px solid #2a2f4a; }
+    .ct-item { font-size:12px; }
+    .ct-label { color:#666; margin-right:4px; }
     @media(max-width:900px) { .stats{grid-template-columns:repeat(2,1fr);} .charts-row{grid-template-columns:1fr;} }
   </style>
 </head>
@@ -109,13 +113,13 @@
       <div class="stat-sub">Awaiting approval</div>
     </div>
     <div class="stat">
-      <div class="stat-label">Open Trades</div>
-      <div class="stat-val" id="statTrades">—</div>
-      <div class="stat-sub">Bot managed</div>
+      <div class="stat-label">Total Profit Paid</div>
+      <div class="stat-val" style="color:#00e090;">$<span id="statProfitPaid">0.00</span></div>
+      <div class="stat-sub"><span id="statTradesToday">0</span> trades today</div>
     </div>
     <div class="stat">
       <div class="stat-label">Referral Commissions</div>
-      <div class="stat-val" style="color:#00e090;">$<span id="statRefs">0.00</span></div>
+      <div class="stat-val" style="color:#a78bfa;">$<span id="statRefs">0.00</span></div>
       <div class="stat-sub"><span id="statRefCount">0</span> referrals</div>
     </div>
   </div>
@@ -163,6 +167,16 @@
         <input type="text" id="clientSearch" placeholder="Search by name or email..." oninput="filterClients()">
       </div>
       <div id="clientList" class="loading">Loading...</div>
+      <!-- platform-wide totals footer -->
+      <div class="client-totals" id="clientTotals" style="display:none;">
+        <div class="ct-item"><span class="ct-label">Platform Balances:</span><span id="ctBalance" style="color:#00e090;font-weight:bold;"></span></div>
+        <div class="ct-item"><span class="ct-label">Total Equity:</span><span id="ctEquity" style="color:#d4af37;font-weight:bold;"></span></div>
+        <div class="ct-item"><span class="ct-label">Total Deposited:</span><span id="ctDeposits" style="color:#00e090;font-weight:bold;"></span></div>
+        <div class="ct-item"><span class="ct-label">Total Withdrawn:</span><span id="ctWithdrawals" style="color:#ff4560;font-weight:bold;"></span></div>
+        <div class="ct-item"><span class="ct-label">Total Profits:</span><span id="ctProfits" style="color:#d4af37;font-weight:bold;"></span></div>
+        <div class="ct-item"><span class="ct-label">Total Ref Earned:</span><span id="ctRefEarned" style="color:#a78bfa;font-weight:bold;"></span></div>
+        <div class="ct-item"><span class="ct-label">Total Generated:</span><span id="ctGenerated" style="color:#ffc800;font-weight:bold;"></span></div>
+      </div>
     </div>
   </div>
 
@@ -296,6 +310,7 @@
 const api  = (url,opts={}) => fetch(url,{credentials:'same-origin',...opts}).then(r=>r.json());
 const post = (u,b) => api(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
 const fmt  = n => parseFloat(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmtD = n => '$' + fmt(n);
 
 let allTx=[], allClients=[];
 let txChart, clientChart;
@@ -341,7 +356,8 @@ async function loadStats(){
   document.getElementById('statDeposits').textContent    = fmt(s.deposits);
   document.getElementById('statWithdrawals').textContent = fmt(s.withdrawals);
   document.getElementById('statPending').textContent     = s.pending_deposits;
-  document.getElementById('statTrades').textContent      = s.open_trades;
+  document.getElementById('statProfitPaid').textContent  = fmt(s.total_profit_paid||0);
+  document.getElementById('statTradesToday').textContent = s.trades_today||0;
   document.getElementById('statRefs').textContent        = fmt(s.ref_commissions||0);
   document.getElementById('statRefCount').textContent    = s.total_referrals||0;
   const pc=document.getElementById('pendingCount');
@@ -402,7 +418,7 @@ async function loadPending(){
     const addr=(t.deposit_address||'—');
     const addrShort=addr.length>20?addr.substring(0,20)+'...':addr;
     html+=`<tr>
-      <td style="color:#aaa;white-space:nowrap;">${(t.created_at||'').substring(0,16).replace('T',' ')}</td>
+      <td style="color:#aaa;">${(t.created_at||'').substring(0,16).replace('T',' ')}</td>
       <td><div style="font-weight:bold;">${t.user_name||'—'}</div><div style="font-size:10px;color:#555;">${t.user_email||''}</div></td>
       <td style="color:#00e090;font-weight:bold;">$${fmt(t.amount_usd)}</td>
       <td><span class="badge badge-pending">${t.method||'—'}</span></td>
@@ -423,25 +439,82 @@ function renderClients(clients){
   const el=document.getElementById('clientList');
   if(!clients||!clients.length){
     el.innerHTML='<div class="empty">No clients registered yet.</div>';
+    document.getElementById('clientTotals').style.display='none';
     return;
   }
-  let html='<table class="tbl"><thead><tr><th>#</th><th>Name</th><th>Email</th><th>Phone</th><th>Balance</th><th>Equity</th><th>Ref Balance</th><th>Referrals</th><th>Ref Code</th><th>Joined</th></tr></thead><tbody>';
+
+  let html=`<table class="tbl"><thead><tr>
+    <th>#</th>
+    <th>Name</th>
+    <th>Email</th>
+    <th>Phone</th>
+    <th>Balance</th>
+    <th>Equity</th>
+    <th>Total Deposits</th>
+    <th>Total Withdrawals</th>
+    <th>Trade Profits</th>
+    <th>Ref Earned</th>
+    <th>Ref Balance</th>
+    <th>Referrals</th>
+    <th>Days Active</th>
+    <th>Total Generated</th>
+    <th>Ref Code</th>
+    <th>Joined</th>
+  </tr></thead><tbody>`;
+
+  // running totals for the footer
+  let sumBalance=0, sumEquity=0, sumDeposits=0, sumWithdrawals=0,
+      sumProfits=0, sumRefEarned=0, sumGenerated=0;
+
   clients.forEach((c,i)=>{
+    const dep    = parseFloat(c.total_deposits   ||0);
+    const wdr    = parseFloat(c.total_withdrawals||0);
+    const profit = parseFloat(c.total_profit     ||0);
+    const refE   = parseFloat(c.total_ref_earned ||0);
+    const bal    = parseFloat(c.balance          ||0);
+    const eq     = parseFloat(c.equity           ||0);
+    const refBal = parseFloat(c.ref_balance      ||0);
+    const gen    = dep + profit + refE;   // all cash inflow
+
+    sumBalance     += bal;
+    sumEquity      += eq;
+    sumDeposits    += dep;
+    sumWithdrawals += wdr;
+    sumProfits     += profit;
+    sumRefEarned   += refE;
+    sumGenerated   += gen;
+
     html+=`<tr>
       <td style="color:#555;">${i+1}</td>
       <td style="font-weight:bold;">${c.name||'—'}</td>
       <td style="color:#aaa;font-size:11px;">${c.email||'—'}</td>
       <td style="color:#aaa;font-size:11px;">${c.phone||'—'}</td>
-      <td style="color:#00e090;font-weight:bold;">$${fmt(c.balance)}</td>
-      <td style="color:#d4af37;">$${fmt(c.equity)}</td>
-      <td style="color:#a78bfa;">$${fmt(c.ref_balance)}</td>
+      <td style="color:#00e090;font-weight:bold;">${fmtD(bal)}</td>
+      <td style="color:#d4af37;font-weight:bold;">${fmtD(eq)}</td>
+      <td style="color:#00e090;">${fmtD(dep)}</td>
+      <td style="color:#ff4560;">${fmtD(wdr)}</td>
+      <td style="color:#d4af37;">${fmtD(profit)}</td>
+      <td style="color:#a78bfa;">${fmtD(refE)}</td>
+      <td style="color:#a78bfa;">${fmtD(refBal)}</td>
       <td style="text-align:center;">${c.ref_count||0}</td>
+      <td style="text-align:center;color:#aaa;">${c.days_active||0}</td>
+      <td style="color:#ffc800;font-weight:bold;">${fmtD(gen)}</td>
       <td style="font-family:monospace;font-size:11px;color:#aaa;">${c.referral_code||'—'}</td>
       <td style="color:#555;font-size:11px;">${(c.created_at||'').substring(0,10)}</td>
     </tr>`;
   });
   html+='</tbody></table>';
   el.innerHTML=html;
+
+  // populate footer totals
+  document.getElementById('ctBalance').textContent     = fmtD(sumBalance);
+  document.getElementById('ctEquity').textContent      = fmtD(sumEquity);
+  document.getElementById('ctDeposits').textContent    = fmtD(sumDeposits);
+  document.getElementById('ctWithdrawals').textContent = fmtD(sumWithdrawals);
+  document.getElementById('ctProfits').textContent     = fmtD(sumProfits);
+  document.getElementById('ctRefEarned').textContent   = fmtD(sumRefEarned);
+  document.getElementById('ctGenerated').textContent   = fmtD(sumGenerated);
+  document.getElementById('clientTotals').style.display='flex';
 }
 
 function filterClients(){
@@ -459,9 +532,9 @@ function renderTx(txs){
     const bc=t.status==='COMPLETED'?'badge-completed':t.status==='PENDING'?'badge-pending':'badge-rejected';
     const showApprove=(t.type==='WITHDRAWAL'||t.type==='REFERRAL_WITHDRAWAL')&&t.status==='PENDING';
     html+=`<tr>
-      <td style="color:#aaa;font-size:11px;white-space:nowrap;">${(t.created_at||'').substring(0,16).replace('T',' ')}</td>
+      <td style="color:#aaa;font-size:11px;">${(t.created_at||'').substring(0,16).replace('T',' ')}</td>
       <td style="font-weight:bold;">${t.user_name||'—'}</td>
-      <td class="${tc}">${(t.type||'').replace('_',' ')}</td>
+      <td class="${tc}">${(t.type||'').replace(/_/g,' ')}</td>
       <td style="font-weight:bold;">$${fmt(t.amount_usd)}</td>
       <td style="color:#aaa;font-size:11px;">${t.method||'—'}</td>
       <td><span class="badge ${bc}">${t.status}</span></td>
@@ -593,9 +666,9 @@ async function confirmApprove(){
   closeModal('approveModal');
   if(!d.success){showError(d.error);return;}
   showSuccess(d.data.message);
-  loadStats(); loadPending(); renderTx(allTx);
-  // Reload transactions in background
+  loadStats(); loadPending();
   api('/api/admin/transactions').then(r=>{ if(r.success){allTx=r.data; renderTx(allTx);} });
+  api('/api/admin/clients').then(r=>{ if(r.success){allClients=r.data;} });
 }
 async function confirmReject(){
   const txId=document.getElementById('rejectTxId').value;
@@ -614,13 +687,13 @@ async function confirmWdrApprove(){
   showSuccess('Withdrawal marked complete.');
   loadStats();
   api('/api/admin/transactions').then(r=>{ if(r.success){allTx=r.data; renderTx(allTx);} });
+  api('/api/admin/clients').then(r=>{ if(r.success){allClients=r.data;} });
 }
 
 // ── INIT ───────────────────────────────────────────────────────────────────
 async function init(){
   await loadStats();
 
-  // Load ALL data upfront so every tab works immediately
   const [txRes, clientRes] = await Promise.all([
     api('/api/admin/transactions'),
     api('/api/admin/clients')
@@ -629,7 +702,6 @@ async function init(){
   if(txRes.success)     allTx      = txRes.data;
   if(clientRes.success) allClients = clientRes.data;
 
-  // Show data immediately on active tabs
   loadPending();
   buildCharts(allTx, allClients);
   populateAdjustClients();
@@ -640,7 +712,7 @@ async function init(){
     const r=await api('/api/admin/transactions');
     if(r.success) allTx=r.data;
     const c=await api('/api/admin/clients');
-    if(c.success) allClients=c.data;
+    if(c.success){ allClients=c.data; }
   }, 30000);
 }
 

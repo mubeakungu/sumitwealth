@@ -65,7 +65,7 @@ if not DATABASE_URL:
 
 DAILY_PROFIT        = float(os.environ.get("DAILY_PROFIT_USD", "8.0"))
 MIN_BALANCE         = float(os.environ.get("MIN_BALANCE", "10.0"))
-TRADE_HOUR          = int(os.environ.get("TRADE_HOUR", "8"))   # 8am UTC = 11am EAT
+TRADE_HOUR          = int(os.environ.get("TRADE_HOUR", "5"))   # 8am UTC = 11am EAT
 TRADE_SYMBOL        = os.environ.get("TRADE_SYMBOL", "BTCUSDT")
 CHECK_INTERVAL      = 60   # seconds between scheduler ticks
 

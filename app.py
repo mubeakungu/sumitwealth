@@ -4,7 +4,7 @@ Summit Wealth v5.4 - $8 PROFIT PER $100 BALANCE (8% daily)
 - One controlled trade per client per day
 - Trade profit scales: $8 per $100 of balance
 - Realistic trade using real Binance prices
-- Referral system: 20% commission
+- Referral system: 16% commission
 - Manual wallet for deposits
 - Min deposit: $100
 - Withdrawal deducted only on admin approval
@@ -81,7 +81,7 @@ MANUAL_WALLETS = {
     "ERC20": os.environ.get("WALLET_ERC20", ""),
 }
 
-REFERRAL_COMMISSION_PCT = 0.20
+REFERRAL_COMMISSION_PCT = 0.16
 REFERRAL_MIN_DEPOSIT    = 100.0
 
 # ── DATABASE ──────────────────────────────────────────────────────────────────
@@ -630,9 +630,9 @@ def client_referral_withdraw():
         return err("Invalid PIN", 403)
 
     ref_bal = a["ref_balance"] if a else 0
-    if ref_bal < 10:
+    if ref_bal < 16:
         cur.close(); conn.close()
-        return err("Minimum referral withdrawal is $10")
+        return err("Minimum referral withdrawal is $16")
 
     cur.execute("UPDATE accounts SET ref_balance=0 WHERE user_id=%s", (uid,))
     ref = "REF-" + secrets.token_hex(4).upper()

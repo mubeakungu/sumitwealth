@@ -775,6 +775,30 @@ def client_withdraw():
     cur.close(); conn.close()
     return ok({"reference": ref,
                "message": "Withdrawal submitted. Admin will process within 24hrs."})
+    @app.route("/api/client/stats/withdrawals", methods=["GET"])
+@login_required
+def get_total_withdrawals():
+    uid = session["user_id"]
+    
+    conn = get_db()
+    cur = conn.cursor()
+    
+    # Sum up all successful withdrawals for this user
+    # COALESCE ensures it returns 0.00 instead of None if they haven't withdrawn yet
+    cur.execute(
+        "SELECT COALESCE(SUM(amount_usd), 0) as total FROM transactions "
+        "WHERE user_id=%s AND type='WITHDRAWAL' AND status='COMPLETED'", 
+        (uid,)
+    )
+    result = cur.fetchone()
+    
+    cur.close()
+    conn.close()
+    
+    # Extract total from dictionary-like row or tuple, depending on your cursor type
+    total_amt = float(result["total"] if isinstance(result, dict) else result[0])
+    
+    return ok({"total_withdrawals": total_amt})
 
 # ── ADMIN API ─────────────────────────────────────────────────────────────────
 @app.route("/api/admin/stats")

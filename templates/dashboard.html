@@ -1,3 +1,4 @@
+cat > /mnt/user-data/outputs/templates/dashboard.html << 'HTMLEOF'
 <!DOCTYPE html>
 <html>
 <head>
@@ -7,7 +8,6 @@
     * { margin:0; padding:0; box-sizing:border-box; }
     body { font-family:Arial,sans-serif; background:#0a0e27; color:#fff; }
 
-    /* NAVBAR */
     .navbar {
       background:#1a1f3a; padding:14px 30px;
       border-bottom:2px solid #d4af37;
@@ -20,17 +20,14 @@
     .btn-gold:disabled { opacity:0.5; cursor:not-allowed; }
     .btn-outline { background:transparent; border:1px solid #d4af37; color:#d4af37; padding:6px 14px; border-radius:5px; cursor:pointer; font-size:12px; }
 
-    /* LAYOUT */
     .container { max-width:1300px; margin:0 auto; padding:25px 30px; }
 
-    /* STATS */
     .stats { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin-bottom:25px; }
     .stat  { background:#1a1f3a; border:1px solid #2a2f4a; padding:18px 20px; border-radius:8px; }
     .stat-label { font-size:11px; color:#aaa; text-transform:uppercase; letter-spacing:0.5px; }
     .stat-val   { font-size:20px; color:#d4af37; font-weight:bold; margin-top:8px; }
     .stat-sub   { font-size:11px; margin-top:4px; color:#aaa; }
 
-    /* CHARTS */
     .charts-grid-top    { display:grid; grid-template-columns:2fr 1fr; gap:15px; margin-bottom:15px; }
     .charts-grid-bottom { display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:25px; }
     .chart-card { background:#1a1f3a; border:1px solid #2a2f4a; border-radius:8px; padding:18px; }
@@ -42,32 +39,27 @@
     .coin-tab  { padding:4px 12px; font-size:11px; border-radius:20px; border:1px solid #333; background:transparent; color:#aaa; cursor:pointer; }
     .coin-tab.active { background:#d4af37; color:#0a0e27; border-color:#d4af37; font-weight:bold; }
 
-    /* TABS */
     .tabs { display:flex; gap:5px; margin-bottom:20px; flex-wrap:wrap; }
     .tab  { padding:10px 20px; background:#1a1f3a; border:1px solid #333; cursor:pointer; color:#aaa; border-radius:5px; font-size:13px; }
     .tab.active { background:#d4af37; color:#0a0e27; font-weight:bold; border-color:#d4af37; }
     .tab-content { display:none; }
     .tab-content.show { display:block; }
 
-    /* PANEL */
     .panel { background:#1a1f3a; border:1px solid #2a2f4a; padding:22px; border-radius:8px; max-width:620px; }
     .panel-wide { max-width:100%; }
     .panel h2 { margin-bottom:20px; font-size:16px; }
 
-    /* FORM */
     .form-group { margin-bottom:15px; }
     label { display:block; margin-bottom:5px; font-size:11px; color:#aaa; letter-spacing:0.5px; }
     input, select { width:100%; padding:10px 12px; border:1px solid #333; background:#0a0e27; color:#fff; border-radius:5px; font-size:13px; }
     input:focus, select:focus { outline:none; border-color:#d4af37; }
 
-    /* ALERTS */
     .alert { padding:10px 14px; border-radius:5px; margin-bottom:15px; font-size:12px; display:none; }
     .alert.show   { display:block; }
     .alert-error  { background:rgba(255,69,96,0.15);   border:1px solid #ff4560; color:#ff4560; }
     .alert-success{ background:rgba(0,224,144,0.15);   border:1px solid #00e090; color:#00e090; }
     .alert-info   { background:rgba(0,136,255,0.15);   border:1px solid #0088ff; color:#0088ff; }
 
-    /* ADDRESS BOX */
     .address-box {
       background:#0a0e27; border:1px solid #d4af37;
       padding:14px; border-radius:5px; margin:15px 0;
@@ -76,7 +68,6 @@
     .copy-btn { padding:7px 14px; background:#333; color:#d4af37; border:1px solid #d4af37; border-radius:5px; cursor:pointer; font-size:11px; }
     .copy-btn:hover { background:#d4af37; color:#0a0e27; }
 
-    /* HISTORY TABLE */
     .tbl { width:100%; border-collapse:collapse; font-size:12px; }
     .tbl th { padding:10px 12px; text-align:left; color:#d4af37; background:rgba(212,175,55,0.08); border-bottom:1px solid #333; }
     .tbl td { padding:10px 12px; border-bottom:1px solid #1e2440; vertical-align:middle; }
@@ -90,7 +81,6 @@
     .type-withdrawal { color:#ff4560; font-weight:bold; }
     .type-ref        { color:#d4af37; font-weight:bold; }
 
-    /* REFERRAL SECTION */
     .ref-card {
       background:linear-gradient(135deg, #1a1f3a 0%, #0f1428 100%);
       border:1px solid #d4af37; border-radius:10px; padding:24px; margin-bottom:20px;
@@ -113,11 +103,15 @@
       display:flex; justify-content:space-between; align-items:center;
     }
     .ref-balance-val { font-size:24px; color:#00e090; font-weight:bold; }
-
-    /* STEPS INFO */
     .steps-box { background:#0a0e27; border-radius:6px; padding:14px; font-size:12px; line-height:2; margin-top:14px; }
 
-    /* COLOR UTILS */
+    /* pending withdrawal notice */
+    .pending-notice {
+      background:rgba(255,200,0,0.08); border:1px solid rgba(255,200,0,0.3);
+      border-radius:5px; padding:8px 12px; margin-top:6px;
+      font-size:11px; color:#ffc800; display:none;
+    }
+
     .up   { color:#00e090; }
     .down { color:#ff4560; }
 
@@ -130,7 +124,6 @@
 </head>
 <body>
 
-<!-- NAVBAR -->
 <div class="navbar">
   <div class="nav-brand">&#128176; SUMMIT WEALTH</div>
   <div class="nav-right">
@@ -161,7 +154,8 @@
     <div class="stat">
       <div class="stat-label">Total Withdrawn</div>
       <div class="stat-val">$<span id="withdrawn">0.00</span></div>
-      <div class="stat-sub down" id="wdr-count"></div>
+      <!-- FIX: show pending withdrawals sub-label -->
+      <div class="stat-sub down" id="wdr-pending-label"></div>
     </div>
     <div class="stat" style="border-color:rgba(212,175,55,0.4); cursor:pointer;" onclick="switchTabByName('referral')">
       <div class="stat-label">Referral Earnings</div>
@@ -221,11 +215,11 @@
   <div id="deposit" class="tab-content show">
     <div class="panel">
       <h2>Deposit USDT</h2>
-      <div class="alert alert-info show">Send USDT to your address. Min: $10. Auto-updates in 1-5 minutes.</div>
+      <div class="alert alert-info show">Send USDT to your address. Min: $100. Balance updates after admin confirms.</div>
       <div id="depStep1">
         <div class="form-group">
           <label>Amount (USDT)</label>
-          <input type="number" id="depAmount" placeholder="10" min="10">
+          <input type="number" id="depAmount" placeholder="100" min="100">
         </div>
         <div class="form-group">
           <label>Network</label>
@@ -259,10 +253,15 @@
   <div id="withdraw" class="tab-content">
     <div class="panel">
       <h2>Withdraw USDT</h2>
-      <div class="alert alert-info show">Instant on-chain. Min: $1,000. Processed via Binance.</div>
-      <div style="font-size:18px; color:#d4af37; font-weight:bold; margin-bottom:16px;">
+      <div class="alert alert-info show">Min: $1,000. Processed within 24hrs after admin approval.</div>
+      <div style="font-size:18px; color:#d4af37; font-weight:bold; margin-bottom:4px;">
         Available: $<span id="wdrBal">0.00</span>
       </div>
+      <!-- FIX: show pending withdrawal notice on withdraw tab -->
+      <div id="wdrPendingNotice" class="pending-notice">
+        &#9888; You have $<span id="wdrPendingAmt">0.00</span> in pending withdrawals awaiting admin approval.
+      </div>
+      <div style="margin-bottom:16px;"></div>
       <div class="alert alert-error"   id="wdrErr"></div>
       <div class="alert alert-success" id="wdrOk"></div>
       <div class="form-group">
@@ -308,7 +307,6 @@
   <!-- REFERRAL TAB -->
   <div id="referral" class="tab-content">
 
-    <!-- Referral link card -->
     <div class="ref-card">
       <h3>&#127381; Your Referral Program</h3>
       <p style="color:#aaa; font-size:13px; margin-bottom:4px;">
@@ -332,7 +330,6 @@
         </div>
       </div>
 
-      <!-- Stats row -->
       <div class="ref-stats">
         <div class="ref-stat">
           <div class="ref-stat-val" id="refStatCount">0</div>
@@ -348,7 +345,6 @@
         </div>
       </div>
 
-      <!-- How it works -->
       <div class="steps-box">
         <strong style="color:#d4af37;">How it works:</strong><br>
         1. Share your referral link with friends<br>
@@ -358,7 +354,6 @@
       </div>
     </div>
 
-    <!-- Withdraw referral earnings -->
     <div class="panel" style="margin-bottom:20px;">
       <h2>&#128176; Withdraw Referral Earnings</h2>
       <div class="ref-balance-box">
@@ -393,15 +388,14 @@
       <button class="btn-gold" onclick="withdrawReferral()">Withdraw Referral Earnings</button>
     </div>
 
-    <!-- Referral history table -->
     <div class="panel panel-wide">
       <h2>&#128202; Referral History</h2>
       <div id="refHistoryList" style="color:#aaa; padding:10px 0;">Loading...</div>
     </div>
 
-  </div><!-- /referral tab -->
+  </div>
 
-</div><!-- /container -->
+</div>
 
 <script>
   const api  = (url, opts={}) => fetch(url, {credentials:'same-origin', ...opts}).then(r=>r.json());
@@ -481,7 +475,7 @@
       sorted.forEach(t=>{
         if(t.status==='COMPLETED'){
           if(t.type==='DEPOSIT')running+=t.amount_usd;
-          if(t.type==='WITHDRAWAL')running-=t.amount_usd;
+          if(t.type==='WITHDRAWAL'||t.type==='REFERRAL_WITHDRAWAL')running-=t.amount_usd;
           labels.push((t.created_at||'').substring(5,10));
           plData.push(parseFloat(running.toFixed(2)));
         }
@@ -503,7 +497,7 @@
     const pts=[{label:'Now',val:balance}];
     sorted.forEach(t=>{
       if(t.type==='DEPOSIT')running-=t.amount_usd;
-      if(t.type==='WITHDRAWAL')running+=t.amount_usd;
+      if(t.type==='WITHDRAWAL'||t.type==='REFERRAL_WITHDRAWAL')running+=t.amount_usd;
       pts.push({label:(t.created_at||'').substring(5,10),val:parseFloat(running.toFixed(2))});
     });
     pts.reverse();
@@ -518,7 +512,7 @@
       const mo=(t.created_at||'').substring(0,7); if(!mo)return;
       if(!months[mo])months[mo]={dep:0,wdr:0};
       if(t.type==='DEPOSIT')months[mo].dep+=t.amount_usd;
-      if(t.type==='WITHDRAWAL')months[mo].wdr+=t.amount_usd;
+      if(t.type==='WITHDRAWAL'||t.type==='REFERRAL_WITHDRAWAL')months[mo].wdr+=t.amount_usd;
     });
     const labels=Object.keys(months).sort();
     if(!labels.length){labels.push(new Date().toISOString().substring(0,7));months[labels[0]]={dep:0,wdr:0};}
@@ -528,16 +522,33 @@
 
   // ── LOAD DASHBOARD ──────────────────────────────────────────────────────────
   async function loadDash(){
-    const [sumRes,txRes]=await Promise.all([api('/api/client/summary'),api('/api/client/transactions')]);
-    if(!sumRes.success){window.location='/';return;}
-    const s=sumRes.data; const txs=txRes.data||[];
+    const [sumRes, txRes] = await Promise.all([
+      api('/api/client/summary'),
+      api('/api/client/transactions')
+    ]);
+
+    if(!sumRes.success){ window.location='/'; return; }
+    const s   = sumRes.data;
+    const txs = txRes.data || [];
 
     document.getElementById('username').textContent  = s.name;
     document.getElementById('balance').textContent   = fmt(s.balance);
     document.getElementById('equity').textContent    = fmt(s.equity);
     document.getElementById('deposited').textContent = fmt(s.total_deposits);
+
+    // ── FIX: use total_withdrawals from summary (now includes REFERRAL_WITHDRAWAL) ──
     document.getElementById('withdrawn').textContent = fmt(s.total_withdrawals);
     document.getElementById('wdrBal').textContent    = fmt(s.balance);
+
+    // ── FIX: show pending withdrawal info if any in-flight ──────────────────
+    const pendingWdr = parseFloat(s.pending_withdrawals || 0);
+    if(pendingWdr > 0){
+      document.getElementById('wdr-pending-label').textContent = '$'+fmt(pendingWdr)+' pending';
+      document.getElementById('wdr-pending-label').style.color = '#ffc800';
+      // also show notice on withdraw tab
+      document.getElementById('wdrPendingAmt').textContent = fmt(pendingWdr);
+      document.getElementById('wdrPendingNotice').style.display = 'block';
+    }
 
     // Referral stats
     const refBal = parseFloat(s.ref_balance||0);
@@ -548,13 +559,11 @@
     document.getElementById('refStatBal').textContent    = '$'+fmt(refBal);
     document.getElementById('refWithdrawBal').textContent= fmt(refBal);
 
-    // Referral code + link
     const code = s.ref_code||'';
     const link = window.location.origin+'/register?ref='+code;
     document.getElementById('refCode').textContent = code;
     document.getElementById('refLink').textContent = link;
 
-    // Show badge if has ref balance
     if(refBal>0){
       const badge=document.getElementById('refBadge');
       badge.textContent='$'+fmt(refBal);
@@ -562,13 +571,11 @@
     }
 
     const depCount=txs.filter(t=>t.type==='DEPOSIT').length;
-    const wdrCount=txs.filter(t=>t.type==='WITHDRAWAL').length;
     document.getElementById('dep-count').textContent=depCount+' transaction'+(depCount!==1?'s':'');
-    document.getElementById('wdr-count').textContent=wdrCount+' transaction'+(wdrCount!==1?'s':'');
 
     buildPriceChart();
     buildPLChart(txs);
-    buildBalanceChart(s.balance,txs);
+    buildBalanceChart(s.balance, txs);
     buildTxChart(txs);
   }
 
@@ -594,7 +601,7 @@
   async function getDepositAddr(){
     const amt=parseFloat(document.getElementById('depAmount').value||0);
     const net=document.getElementById('depNetwork').value;
-    if(amt<10){showErr('depErr','Min $10');return;}
+    if(amt<100){showErr('depErr','Min $100');return;}
     const d=await api('/api/client/deposit/address?network='+net);
     if(!d.success){showErr('depErr',d.error);return;}
     document.getElementById('depAddress').textContent  = d.data.address;
@@ -631,10 +638,8 @@
     const addr = document.getElementById('refWdrAddr').value.trim();
     const pin  = document.getElementById('refWdrPin').value;
     const net  = document.getElementById('refWdrNetwork').value;
-
     if(!addr){showErr('refWdrErr','Enter your USDT wallet address');return;}
     if(!pin) {showErr('refWdrErr','Enter your PIN');return;}
-
     const d=await post('/api/client/referral/withdraw',{address:addr,pin,network:net});
     if(!d.success){showErr('refWdrErr',d.error);return;}
     showSuccess('refWdrOk', d.data.message);
@@ -657,7 +662,7 @@
       const bc=t.status==='COMPLETED'?'badge-completed':(t.status==='PENDING'?'badge-pending':'badge-rejected');
       html+=`<tr>
         <td style="color:#aaa;">${(t.created_at||'').substring(0,10)}</td>
-        <td class="${tc}">${t.type.replace('_',' ')}</td>
+        <td class="${tc}">${t.type.replace(/_/g,' ')}</td>
         <td style="font-weight:bold;">$${fmt(t.amount_usd)}</td>
         <td style="color:#aaa;">${t.method||'—'}</td>
         <td><span class="badge ${bc}">${t.status}</span></td>
@@ -748,3 +753,6 @@
 </script>
 </body>
 </html>
+  
+</htmlcomplete
+

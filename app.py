@@ -66,7 +66,7 @@ if not DATABASE_URL:
 # $8 profit per $100 balance — this is the rate, not a flat fee
 DAILY_PROFIT_PER_100 = float(os.environ.get("DAILY_PROFIT_USD", "8.0"))
 MIN_BALANCE          = float(os.environ.get("MIN_BALANCE", "100.0"))
-TRADE_HOUR           = int(os.environ.get("TRADE_HOUR", "5"))   # 8am UTC = 11am EAT
+TRADE_HOUR           = int(os.environ.get("TRADE_HOUR", "5"))   # 5am UTC = 8am EAT
 TRADE_SYMBOL         = os.environ.get("TRADE_SYMBOL", "BTCUSDT")
 CHECK_INTERVAL       = 60   # seconds between scheduler ticks
 

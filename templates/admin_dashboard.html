@@ -144,6 +144,10 @@
       &#9888; Pending Deposits
       <span id="pendingCount" style="background:#ff4560;color:#fff;border-radius:20px;padding:1px 7px;font-size:10px;margin-left:5px;display:none;"></span>
     </button>
+    <button class="tab" onclick="switchTab(event,'pendingWdr')">
+      &#9888; Pending Withdrawals
+      <span id="pendingWdrCount" style="background:#ff4560;color:#fff;border-radius:20px;padding:1px 7px;font-size:10px;margin-left:5px;display:none;"></span>
+    </button>
     <button class="tab" onclick="switchTab(event,'clients')">&#128100; Clients</button>
     <button class="tab" onclick="switchTab(event,'transactions')">&#9776; Transactions</button>
     <button class="tab" onclick="switchTab(event,'referrals')">&#128279; Referrals</button>
@@ -151,11 +155,19 @@
     <button class="tab" onclick="switchTab(event,'adjust')">&#9881; Adjust Balance</button>
   </div>
 
-  <!-- PENDING -->
+  <!-- PENDING DEPOSITS -->
   <div id="pending" class="tab-content show">
     <div class="panel">
       <div class="panel-title">&#9888; Pending Deposit Approvals</div>
       <div id="pendingList" class="loading">Loading...</div>
+    </div>
+  </div>
+
+  <!-- PENDING WITHDRAWALS -->
+  <div id="pendingWdr" class="tab-content">
+    <div class="panel">
+      <div class="panel-title">&#9888; Pending Withdrawal Approvals</div>
+      <div id="pendingWdrList" class="loading">Loading...</div>
     </div>
   </div>
 
@@ -251,7 +263,7 @@
 
 </div>
 
-<!-- APPROVE MODAL -->
+<!-- APPROVE DEPOSIT MODAL -->
 <div class="modal-overlay" id="approveModal">
   <div class="modal">
     <h3>&#9989; Approve Deposit</h3>
@@ -271,7 +283,7 @@
   </div>
 </div>
 
-<!-- REJECT MODAL -->
+<!-- REJECT DEPOSIT MODAL -->
 <div class="modal-overlay" id="rejectModal">
   <div class="modal">
     <h3>&#10060; Reject Deposit</h3>
@@ -288,20 +300,39 @@
   </div>
 </div>
 
-<!-- WITHDRAWAL MODAL -->
-<div class="modal-overlay" id="wdrModal">
+<!-- APPROVE WITHDRAWAL MODAL -->
+<div class="modal-overlay" id="approveWdrModal">
   <div class="modal">
-    <h3>&#9989; Mark Withdrawal Complete</h3>
-    <p style="color:#aaa;font-size:13px;margin-bottom:18px;">Confirm you have sent USDT to the client's wallet.</p>
+    <h3>&#9989; Approve Withdrawal</h3>
+    <p style="color:#aaa;font-size:13px;margin-bottom:18px;">Confirm you will send USDT to the client's wallet address.</p>
     <div style="background:#0a0e27;border:1px solid #2a2f4a;border-radius:6px;padding:14px;margin-bottom:18px;font-size:13px;line-height:2.1;">
-      <div><span style="color:#aaa;">Client:</span> <strong id="wdrClientName"></strong></div>
-      <div><span style="color:#aaa;">Amount:</span> <span id="wdrAmount" style="color:#ff4560;font-weight:bold;"></span></div>
-      <div><span style="color:#aaa;">To:</span> <span id="wdrAddress" style="font-family:monospace;font-size:11px;color:#aaa;"></span></div>
+      <div><span style="color:#aaa;">Client:</span> <strong id="wdrModalClientName"></strong></div>
+      <div><span style="color:#aaa;">Amount:</span> <span id="wdrModalAmount" style="color:#ff4560;font-weight:bold;"></span></div>
+      <div><span style="color:#aaa;">Network:</span> <span id="wdrModalNetwork" style="color:#d4af37;"></span></div>
+      <div><span style="color:#aaa;">To Address:</span> <span id="wdrModalAddress" style="font-family:monospace;font-size:11px;color:#aaa;"></span></div>
+      <div><span style="color:#aaa;">Reference:</span> <span id="wdrModalRef" style="font-size:11px;color:#aaa;"></span></div>
     </div>
-    <input type="hidden" id="wdrTxId">
+    <input type="hidden" id="wdrModalTxId">
     <div class="modal-btns">
-      <button class="btn" style="background:#333;color:#aaa;" onclick="closeModal('wdrModal')">Cancel</button>
-      <button class="btn btn-gold" onclick="confirmWdrApprove()">&#9989; Mark Complete</button>
+      <button class="btn" style="background:#333;color:#aaa;" onclick="closeModal('approveWdrModal')">Cancel</button>
+      <button class="btn btn-gold" onclick="confirmWdrApprove()">&#9989; Approve &amp; Send</button>
+    </div>
+  </div>
+</div>
+
+<!-- REJECT WITHDRAWAL MODAL -->
+<div class="modal-overlay" id="rejectWdrModal">
+  <div class="modal">
+    <h3>&#10060; Reject Withdrawal</h3>
+    <p style="color:#aaa;font-size:13px;margin-bottom:18px;">The withdrawal will be cancelled and funds returned to client balance.</p>
+    <div class="form-group">
+      <label>Reason for rejection</label>
+      <textarea id="rejectWdrReason" placeholder="e.g. Invalid address, Suspicious activity..."></textarea>
+    </div>
+    <input type="hidden" id="rejectWdrTxId">
+    <div class="modal-btns">
+      <button class="btn" style="background:#333;color:#aaa;" onclick="closeModal('rejectWdrModal')">Cancel</button>
+      <button class="btn btn-red" onclick="confirmWdrReject()">&#10060; Reject</button>
     </div>
   </div>
 </div>
@@ -339,12 +370,13 @@ function switchTab(e,name){
   document.querySelectorAll('.tab').forEach(el=>el.classList.remove('active'));
   document.getElementById(name).classList.add('show');
   e.currentTarget.classList.add('active');
-  if(name==='pending')      loadPending();
-  if(name==='clients')      renderClients(allClients);
-  if(name==='transactions') renderTx(allTx);
-  if(name==='referrals')    loadReferrals();
-  if(name==='trades')       loadTrades();
-  if(name==='adjust')       populateAdjustClients();
+  if(name==='pending')       loadPending();
+  if(name==='pendingWdr')    loadPendingWithdrawals();
+  if(name==='clients')       renderClients(allClients);
+  if(name==='transactions')  renderTx(allTx);
+  if(name==='referrals')     loadReferrals();
+  if(name==='trades')        loadTrades();
+  if(name==='adjust')        populateAdjustClients();
 }
 
 // ── STATS ──────────────────────────────────────────────────────────────────
@@ -403,7 +435,7 @@ function buildCharts(transactions,clients){
   });
 }
 
-// ── PENDING ─────────────────────────────────────────────────────────────────
+// ── PENDING DEPOSITS ────────────────────────────────────────────────────────
 async function loadPending(){
   document.getElementById('pendingList').innerHTML='<div class="loading">Loading...</div>';
   const d=await api('/api/admin/transactions');
@@ -432,6 +464,44 @@ async function loadPending(){
   });
   html+='</tbody></table>';
   document.getElementById('pendingList').innerHTML=html;
+}
+
+// ── PENDING WITHDRAWALS ─────────────────────────────────────────────────────
+async function loadPendingWithdrawals(){
+  document.getElementById('pendingWdrList').innerHTML='<div class="loading">Loading...</div>';
+  const d=await api('/api/admin/transactions');
+  if(!d.success){showError('Failed to load');return;}
+  const pending=d.data.filter(t=>(t.type==='WITHDRAWAL'||t.type==='REFERRAL_WITHDRAWAL')&&t.status==='PENDING');
+  if(!pending.length){
+    document.getElementById('pendingWdrList').innerHTML='<div class="empty">&#9989; No pending withdrawals. All clear!</div>';
+    return;
+  }
+  let html='<table class="tbl"><thead><tr><th>Date</th><th>Client</th><th>Amount</th><th>Type</th><th>Network</th><th>Address</th><th>Reference</th><th>Actions</th></tr></thead><tbody>';
+  pending.forEach(t=>{
+    const addr=(t.deposit_address||'—');
+    const addrShort=addr.length>20?addr.substring(0,20)+'...':addr;
+    const typeLabel=t.type==='REFERRAL_WITHDRAWAL'?'Referral':'Withdrawal';
+    html+=`<tr>
+      <td style="color:#aaa;">${(t.created_at||'').substring(0,16).replace('T',' ')}</td>
+      <td><div style="font-weight:bold;">${t.user_name||'—'}</div><div style="font-size:10px;color:#555;">${t.user_email||''}</div></td>
+      <td style="color:#ff4560;font-weight:bold;">$${fmt(t.amount_usd)}</td>
+      <td><span class="badge badge-pending">${typeLabel}</span></td>
+      <td style="color:#aaa;font-size:11px;">${t.method||'—'}</td>
+      <td style="font-family:monospace;font-size:10px;color:#aaa;" title="${addr}">${addrShort}</td>
+      <td style="font-size:11px;color:#555;">${t.reference||'—'}</td>
+      <td><div style="display:flex;gap:6px;">
+        <button class="btn-sm btn-green" onclick="openApproveWdrModal('${t.id}','${esc(t.user_name)}','${fmt(t.amount_usd)}','${t.method||''}','${esc(addr)}','${t.reference||''}')">&#9989; Approve</button>
+        <button class="btn-sm btn-danger" onclick="openRejectWdrModal('${t.id}')">&#10060; Reject</button>
+      </div></td>
+    </tr>`;
+  });
+  html+='</tbody></table>';
+  document.getElementById('pendingWdrList').innerHTML=html;
+  
+  // Update badge count
+  const wc=document.getElementById('pendingWdrCount');
+  if(pending.length>0){ wc.textContent=pending.length; wc.style.display='inline'; }
+  else { wc.style.display='none'; }
 }
 
 // ── CLIENTS ─────────────────────────────────────────────────────────────────
@@ -539,7 +609,7 @@ function renderTx(txs){
       <td style="color:#aaa;font-size:11px;">${t.method||'—'}</td>
       <td><span class="badge ${bc}">${t.status}</span></td>
       <td style="color:#555;font-size:11px;">${t.reference||'—'}</td>
-      <td>${showApprove?`<button class="btn-sm btn-green" onclick="openWdrModal('${t.id}','${esc(t.user_name)}','$${fmt(t.amount_usd)}','${esc(t.deposit_address||'')}')">&#9989; Mark Done</button>`:'<span style="color:#333;">—</span>'}</td>
+      <td>${showApprove?`<button class="btn-sm btn-green" onclick="openApproveWdrModal('${t.id}','${esc(t.user_name)}','${fmt(t.amount_usd)}','${t.method||''}','${esc(t.deposit_address||'')}','${t.reference||''}')">&#9989; Approve</button>`:'<span style="color:#333;">—</span>'}</td>
     </tr>`;
   });
   html+='</tbody></table>';
@@ -633,6 +703,7 @@ async function submitAdjust(){
 // ── MODALS ─────────────────────────────────────────────────────────────────
 function esc(s){ return (s||'').replace(/'/g,"\\'"); }
 
+// Deposit Modals
 function openApproveModal(txId,name,amount,network,address,ref){
   document.getElementById('modalTxId').value=txId;
   document.getElementById('modalClientName').textContent=name;
@@ -642,24 +713,37 @@ function openApproveModal(txId,name,amount,network,address,ref){
   document.getElementById('modalRef').textContent=ref;
   document.getElementById('approveModal').classList.add('show');
 }
+
 function openRejectModal(txId){
   document.getElementById('rejectTxId').value=txId;
   document.getElementById('rejectReason').value='';
   document.getElementById('rejectModal').classList.add('show');
 }
-function openWdrModal(txId,name,amount,address){
-  document.getElementById('wdrTxId').value=txId;
-  document.getElementById('wdrClientName').textContent=name;
-  document.getElementById('wdrAmount').textContent=amount;
-  document.getElementById('wdrAddress').textContent=address;
-  document.getElementById('wdrModal').classList.add('show');
+
+// Withdrawal Modals
+function openApproveWdrModal(txId,name,amount,network,address,ref){
+  document.getElementById('wdrModalTxId').value=txId;
+  document.getElementById('wdrModalClientName').textContent=name;
+  document.getElementById('wdrModalAmount').textContent='$'+amount;
+  document.getElementById('wdrModalNetwork').textContent=network;
+  document.getElementById('wdrModalAddress').textContent=address;
+  document.getElementById('wdrModalRef').textContent=ref;
+  document.getElementById('approveWdrModal').classList.add('show');
 }
+
+function openRejectWdrModal(txId){
+  document.getElementById('rejectWdrTxId').value=txId;
+  document.getElementById('rejectWdrReason').value='';
+  document.getElementById('rejectWdrModal').classList.add('show');
+}
+
 function closeModal(id){ document.getElementById(id).classList.remove('show'); }
 
 document.querySelectorAll('.modal-overlay').forEach(o=>{
   o.addEventListener('click',e=>{ if(e.target===o) o.classList.remove('show'); });
 });
 
+// Approve/Reject Deposit
 async function confirmApprove(){
   const txId=document.getElementById('modalTxId').value;
   const d=await post('/api/admin/deposit/approve',{tx_id:txId});
@@ -670,6 +754,7 @@ async function confirmApprove(){
   api('/api/admin/transactions').then(r=>{ if(r.success){allTx=r.data; renderTx(allTx);} });
   api('/api/admin/clients').then(r=>{ if(r.success){allClients=r.data;} });
 }
+
 async function confirmReject(){
   const txId=document.getElementById('rejectTxId').value;
   const reason=document.getElementById('rejectReason').value.trim()||'Rejected by admin';
@@ -679,15 +764,28 @@ async function confirmReject(){
   showSuccess('Deposit rejected.');
   loadStats(); loadPending();
 }
+
+// Approve/Reject Withdrawal
 async function confirmWdrApprove(){
-  const txId=document.getElementById('wdrTxId').value;
+  const txId=document.getElementById('wdrModalTxId').value;
   const d=await post('/api/admin/withdrawal/approve',{tx_id:txId});
-  closeModal('wdrModal');
+  closeModal('approveWdrModal');
   if(!d.success){showError(d.error);return;}
-  showSuccess('Withdrawal marked complete.');
+  showSuccess('Withdrawal approved and marked for processing.');
   loadStats();
-  api('/api/admin/transactions').then(r=>{ if(r.success){allTx=r.data; renderTx(allTx);} });
+  api('/api/admin/transactions').then(r=>{ if(r.success){allTx=r.data; renderTx(allTx); loadPendingWithdrawals();} });
   api('/api/admin/clients').then(r=>{ if(r.success){allClients=r.data;} });
+}
+
+async function confirmWdrReject(){
+  const txId=document.getElementById('rejectWdrTxId').value;
+  const reason=document.getElementById('rejectWdrReason').value.trim()||'Rejected by admin';
+  const d=await post('/api/admin/withdrawal/reject',{tx_id:txId,reason});
+  closeModal('rejectWdrModal');
+  if(!d.success){showError(d.error);return;}
+  showSuccess('Withdrawal rejected.');
+  loadStats(); 
+  api('/api/admin/transactions').then(r=>{ if(r.success){allTx=r.data; renderTx(allTx); loadPendingWithdrawals();} });
 }
 
 // ── INIT ───────────────────────────────────────────────────────────────────
@@ -703,6 +801,7 @@ async function init(){
   if(clientRes.success) allClients = clientRes.data;
 
   loadPending();
+  loadPendingWithdrawals();
   buildCharts(allTx, allClients);
   populateAdjustClients();
 
@@ -713,6 +812,7 @@ async function init(){
     if(r.success) allTx=r.data;
     const c=await api('/api/admin/clients');
     if(c.success){ allClients=c.data; }
+    loadPendingWithdrawals();
   }, 30000);
 }
 

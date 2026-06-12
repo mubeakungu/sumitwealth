@@ -902,13 +902,18 @@ def admin_approve_withdrawal():
             or tx["status"] != "PENDING"):
         cur.close(); conn.close()
         return err("Pending withdrawal not found")
+    
+    # Only deduct from balance for regular WITHDRAWAL
+    # REFERRAL_WITHDRAWAL already had ref_balance zeroed when requested
+    if tx["type"] == "WITHDRAWAL":
+        cur.execute(
+            "UPDATE accounts SET balance=balance-%s,equity=equity-%s WHERE user_id=%s",
+            (tx["amount_usd"], tx["amount_usd"], tx["user_id"])
+        )
+    
     cur.execute(
         "UPDATE transactions SET status='COMPLETED',completed_at=%s WHERE id=%s",
         (_now(), txid)
-    )
-    cur.execute(
-        "UPDATE accounts SET balance=balance-%s,equity=equity-%s WHERE user_id=%s",
-        (tx["amount_usd"], tx["amount_usd"], tx["user_id"])
     )
     conn.commit()
     cur.close(); conn.close()

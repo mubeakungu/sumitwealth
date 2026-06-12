@@ -1,8 +1,8 @@
 """
-Summit Wealth v5.3 - ONE TRADE PER DAY = $8 PROFIT
+Summit Wealth v5.4 - $8 PROFIT PER $100 BALANCE (8% daily)
 - Scheduler starts at module level (works with gunicorn on Render)
 - One controlled trade per client per day
-- Trade targets exactly $8 profit then closes
+- Trade profit scales: $8 per $100 of balance
 - Realistic trade using real Binance prices
 - Referral system: 20% commission
 - Manual wallet for deposits
@@ -63,11 +63,12 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL environment variable is not set! Add it in Render → your web service → Environment.")
 
-DAILY_PROFIT        = float(os.environ.get("DAILY_PROFIT_USD", "8.0"))
-MIN_BALANCE         = float(os.environ.get("MIN_BALANCE", "100.0"))
-TRADE_HOUR          = int(os.environ.get("TRADE_HOUR", "5"))   # 8am UTC = 11am EAT
-TRADE_SYMBOL        = os.environ.get("TRADE_SYMBOL", "BTCUSDT")
-CHECK_INTERVAL      = 60   # seconds between scheduler ticks
+# $8 profit per $100 balance — this is the rate, not a flat fee
+DAILY_PROFIT_PER_100 = float(os.environ.get("DAILY_PROFIT_USD", "8.0"))
+MIN_BALANCE          = float(os.environ.get("MIN_BALANCE", "100.0"))
+TRADE_HOUR           = int(os.environ.get("TRADE_HOUR", "5"))   # 8am UTC = 11am EAT
+TRADE_SYMBOL         = os.environ.get("TRADE_SYMBOL", "BTCUSDT")
+CHECK_INTERVAL       = 60   # seconds between scheduler ticks
 
 NETWORKS = {
     "TRC20": {"network": "TRX"},
@@ -164,7 +165,7 @@ CREATE TABLE IF NOT EXISTS daily_trade_log (
     created_at TEXT
 );
 """)
-    conn.commit()  # commit table creation before running any queries
+    conn.commit()
 
     # Safe migrations — add columns if they don't exist
     for col, tbl, defval in [
@@ -271,7 +272,7 @@ def get_live_price(symbol):
 
 def run_daily_trades():
     today = _today()
-    log.info(f"=== Daily trade run: {today} — target ${DAILY_PROFIT} profit/client ===")
+    log.info(f"=== Daily trade run: {today} — ${DAILY_PROFIT_PER_100} profit per $100 balance ===")
 
     price = get_live_price(TRADE_SYMBOL)
     pct_gain    = random.uniform(0.003, 0.005)
@@ -282,9 +283,8 @@ def run_daily_trades():
         log.error("Price diff is zero — cannot compute quantity. Aborting.")
         return
 
-    quantity = round(DAILY_PROFIT / price_diff, 6)
     log.info(f"  Entry: ${price:,.2f} | Close: ${close_price:,.2f} | "
-             f"Qty: {quantity} | Profit: ${DAILY_PROFIT}")
+             f"Rate: ${DAILY_PROFIT_PER_100} per $100 balance")
 
     conn = get_db()
     cur  = conn.cursor()
@@ -308,6 +308,10 @@ def run_daily_trades():
             log.info(f"  Skipping {c['name']} — already traded today")
             continue
 
+        # Scale profit: $8 per $100 of balance
+        client_profit   = round((c["balance"] / 100.0) * DAILY_PROFIT_PER_100, 2)
+        client_quantity = round(client_profit / price_diff, 6)
+
         now = datetime.datetime.utcnow()
         open_minutes_ago = random.randint(30, 90)
         opened_at = (now - datetime.timedelta(minutes=open_minutes_ago)).isoformat()
@@ -322,27 +326,28 @@ def run_daily_trades():
             "pnl,status,close_reason,opened_at,closed_at) "
             "VALUES(%s,%s,%s,%s,'BUY',%s,%s,%s,%s,%s,%s,'CLOSED','TAKE_PROFIT',%s,%s)",
             (trade_id, c["id"], c["account_id"],
-             TRADE_SYMBOL, price, quantity, sl, tp,
-             close_price, DAILY_PROFIT, opened_at, closed_at)
+             TRADE_SYMBOL, price, client_quantity, sl, tp,
+             close_price, client_profit, opened_at, closed_at)
         )
         cur.execute(
             "UPDATE accounts SET balance=balance+%s, equity=equity+%s WHERE user_id=%s",
-            (DAILY_PROFIT, DAILY_PROFIT, c["id"])
+            (client_profit, client_profit, c["id"])
         )
         cur.execute(
             "INSERT INTO daily_trade_log(id,user_id,account_id,trade_id,"
             "profit,date,created_at) VALUES(%s,%s,%s,%s,%s,%s,%s)",
             (_uid(), c["id"], c["account_id"],
-             trade_id, DAILY_PROFIT, today, _now())
+             trade_id, client_profit, today, _now())
         )
         paid += 1
-        log.info(f"  ✓ {c['name']}: BUY {quantity} {TRADE_SYMBOL} "
-                 f"@ ${price:,.2f} → ${close_price:,.2f} = +${DAILY_PROFIT}")
+        log.info(f"  ✓ {c['name']}: BUY {client_quantity} {TRADE_SYMBOL} "
+                 f"@ ${price:,.2f} → ${close_price:,.2f} = +${client_profit} "
+                 f"(balance: ${c['balance']:,.2f})")
 
     conn.commit()
     cur.close()
     conn.close()
-    log.info(f"=== Daily trade complete: {paid}/{len(clients)} clients credited ${DAILY_PROFIT} ===")
+    log.info(f"=== Daily trade complete: {paid}/{len(clients)} clients credited ===")
 
 # ── SCHEDULER ─────────────────────────────────────────────────────────────────
 _scheduler_lock    = threading.Lock()
@@ -566,9 +571,12 @@ def client_summary():
     cur.close()
     conn.close()
 
+    balance = a["balance"] if a else 0
+    expected_daily = round((balance / 100.0) * DAILY_PROFIT_PER_100, 2)
+
     return ok({
         "name":              u["name"],
-        "balance":           a["balance"]       if a else 0,
+        "balance":           balance,
         "equity":            a["equity"]        if a else 0,
         "total_deposits":    dep["s"],
         "total_withdrawals": wdr["s"],
@@ -579,7 +587,8 @@ def client_summary():
         "open_trades":       open_trades["c"],
         "total_profit":      total_profit["s"],
         "days_traded":       days_traded["c"],
-        "daily_profit":      DAILY_PROFIT,
+        "daily_profit":      expected_daily,
+        "daily_profit_rate": DAILY_PROFIT_PER_100,
     })
 
 @app.route("/api/client/referrals")
@@ -707,7 +716,7 @@ def client_deposit_pending():
     net  = d.get("network","TRC20").upper()
     addr = d.get("address","").strip()
 
-    if amt < 10:  return err("Minimum deposit is $10")
+    if amt < 100: return err("Minimum deposit is $100")
     if not addr:  return err("Deposit address is required")
 
     conn = get_db()
@@ -806,7 +815,7 @@ def admin_stats():
         "ref_commissions":     ref_paid,
         "total_profit_paid":   profit_paid,
         "trades_today":        trades_today,
-        "daily_profit_rate":   DAILY_PROFIT,
+        "daily_profit_rate":   DAILY_PROFIT_PER_100,
         "trade_symbol":        TRADE_SYMBOL,
         "scheduler_running":   _scheduler_started,
     })
@@ -981,7 +990,7 @@ def admin_adjust_balance(uid):
 @admin_required
 def admin_run_trades():
     threading.Thread(target=run_daily_trades, daemon=True).start()
-    return ok({"message": f"Daily trades triggered — ${DAILY_PROFIT} profit per active client"})
+    return ok({"message": f"Daily trades triggered — ${DAILY_PROFIT_PER_100} per $100 balance per active client"})
 
 @app.route("/api/admin/trade/log")
 @admin_required
@@ -1043,14 +1052,15 @@ def scheduler_status():
         next_run += datetime.timedelta(days=1)
     hours_left = round((next_run - now).total_seconds() / 3600, 1)
     return ok({
-        "running":          _scheduler_started,
-        "trade_hour_utc":   TRADE_HOUR,
-        "trade_hour_eat":   TRADE_HOUR + 3,
-        "next_run_utc":     next_run.isoformat(),
-        "hours_until_run":  hours_left,
-        "daily_profit":     DAILY_PROFIT,
-        "min_balance":      MIN_BALANCE,
-        "symbol":           TRADE_SYMBOL,
+        "running":           _scheduler_started,
+        "trade_hour_utc":    TRADE_HOUR,
+        "trade_hour_eat":    TRADE_HOUR + 3,
+        "next_run_utc":      next_run.isoformat(),
+        "hours_until_run":   hours_left,
+        "daily_profit_rate": DAILY_PROFIT_PER_100,
+        "profit_basis":      "per $100 balance",
+        "min_balance":       MIN_BALANCE,
+        "symbol":            TRADE_SYMBOL,
     })
 
 # ── STARTUP ───────────────────────────────────────────────────────────────────
@@ -1059,12 +1069,12 @@ start_scheduler()
 
 if __name__ == "__main__":
     print("\n" + "="*60)
-    print("   Summit Wealth v5.3 — ONE TRADE/DAY = $8 PROFIT")
+    print("   Summit Wealth v5.4 — $8 PROFIT PER $100 BALANCE")
     print("="*60)
     print(f"   URL    : http://127.0.0.1:8080")
     print(f"   Client : john@test.com  / demo1234")
     print(f"   Admin  : admin@test.com / admin1234")
-    print(f"   Profit : ${DAILY_PROFIT}/day at {TRADE_HOUR:02d}:00 UTC ({TRADE_HOUR+3:02d}:00 EAT)")
+    print(f"   Rate   : ${DAILY_PROFIT_PER_100} per $100 balance/day at {TRADE_HOUR:02d}:00 UTC ({TRADE_HOUR+3:02d}:00 EAT)")
     print(f"   Symbol : {TRADE_SYMBOL}")
     print(f"   Min Dep: $100")
     print(f"   Binance: {'CONNECTED ✓' if bnb else 'fallback prices'}")

@@ -1,5 +1,6 @@
+cat > /mnt/user-data/outputs/app.py << 'PYEOF'
 """
-Summit Wealth v5.4 - $8 PROFIT PER $100 BALANCE (8% daily)
+Summit Wealth v5.5 - $8 PROFIT PER $100 BALANCE (8% daily)
 - Scheduler starts at module level (works with gunicorn on Render)
 - One controlled trade per client per day
 - Trade profit scales: $8 per $100 of balance
@@ -9,6 +10,10 @@ Summit Wealth v5.4 - $8 PROFIT PER $100 BALANCE (8% daily)
 - Min deposit: $100
 - Withdrawal deducted only on admin approval
 - Database: PostgreSQL (psycopg2)
+- FIX v5.5: total_withdrawals now correctly summed in client_summary
+            both WITHDRAWAL and REFERRAL_WITHDRAWAL counted
+            referral withdrawal rejection now restores ref_balance
+            admin clients list now includes total_deposits/withdrawals
 """
 
 import os, hashlib, secrets, datetime, uuid, logging, threading, random
@@ -61,14 +66,13 @@ bnb = make_binance_client()
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
-    raise RuntimeError("DATABASE_URL environment variable is not set! Add it in Render → your web service → Environment.")
+    raise RuntimeError("DATABASE_URL environment variable is not set!")
 
-# $8 profit per $100 balance — this is the rate, not a flat fee
 DAILY_PROFIT_PER_100 = float(os.environ.get("DAILY_PROFIT_USD", "8.0"))
 MIN_BALANCE          = float(os.environ.get("MIN_BALANCE", "100.0"))
-TRADE_HOUR           = int(os.environ.get("TRADE_HOUR", "5"))   # 5am UTC = 8am EAT
+TRADE_HOUR           = int(os.environ.get("TRADE_HOUR", "5"))
 TRADE_SYMBOL         = os.environ.get("TRADE_SYMBOL", "BTCUSDT")
-CHECK_INTERVAL       = 60   # seconds between scheduler ticks
+CHECK_INTERVAL       = 60
 
 NETWORKS = {
     "TRC20": {"network": "TRX"},
@@ -86,7 +90,6 @@ REFERRAL_MIN_DEPOSIT    = 100.0
 
 # ── DATABASE ──────────────────────────────────────────────────────────────────
 def get_db():
-    """Return a new PostgreSQL connection with dict-like row access."""
     conn = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
     return conn
 
@@ -167,7 +170,6 @@ CREATE TABLE IF NOT EXISTS daily_trade_log (
 """)
     conn.commit()
 
-    # Safe migrations — add columns if they don't exist
     for col, tbl, defval in [
         ("referral_code", "users",    "''"),
         ("referred_by",   "users",    "NULL"),
@@ -180,17 +182,13 @@ CREATE TABLE IF NOT EXISTS daily_trade_log (
 
     conn.commit()
 
-    # Assign referral codes to users missing one
     cur.execute("SELECT id FROM users WHERE referral_code IS NULL OR referral_code=''")
     users = cur.fetchall()
     for u in users:
-        cur.execute(
-            "UPDATE users SET referral_code=%s WHERE id=%s",
-            (secrets.token_hex(4).upper(), u["id"])
-        )
+        cur.execute("UPDATE users SET referral_code=%s WHERE id=%s",
+                    (secrets.token_hex(4).upper(), u["id"]))
     conn.commit()
 
-    # Create demo users if no users exist
     cur.execute("SELECT 1 FROM users LIMIT 1")
     if not cur.fetchone():
         uid  = str(uuid.uuid4())
@@ -260,7 +258,7 @@ def get_live_price(symbol):
     if bnb:
         try:
             ticker = bnb.get_symbol_ticker(symbol=symbol)
-            price = float(ticker["price"])
+            price  = float(ticker["price"])
             log.info(f"Live Binance price {symbol}: ${price:,.2f}")
             return price
         except Exception as e:
@@ -274,21 +272,19 @@ def run_daily_trades():
     today = _today()
     log.info(f"=== Daily trade run: {today} — ${DAILY_PROFIT_PER_100} profit per $100 balance ===")
 
-    price = get_live_price(TRADE_SYMBOL)
+    price       = get_live_price(TRADE_SYMBOL)
     pct_gain    = random.uniform(0.003, 0.005)
     close_price = round(price * (1 + pct_gain), 2)
     price_diff  = close_price - price
 
     if price_diff <= 0:
-        log.error("Price diff is zero — cannot compute quantity. Aborting.")
+        log.error("Price diff is zero — aborting.")
         return
 
-    log.info(f"  Entry: ${price:,.2f} | Close: ${close_price:,.2f} | "
-             f"Rate: ${DAILY_PROFIT_PER_100} per $100 balance")
+    log.info(f"  Entry: ${price:,.2f} | Close: ${close_price:,.2f} | Rate: ${DAILY_PROFIT_PER_100}/$100")
 
     conn = get_db()
     cur  = conn.cursor()
-
     cur.execute(
         "SELECT u.id, u.name, a.id AS account_id, a.balance "
         "FROM users u JOIN accounts a ON u.id=a.user_id "
@@ -300,25 +296,22 @@ def run_daily_trades():
     paid = 0
 
     for c in clients:
-        cur.execute(
-            "SELECT id FROM daily_trade_log WHERE user_id=%s AND date=%s",
-            (c["id"], today)
-        )
+        cur.execute("SELECT id FROM daily_trade_log WHERE user_id=%s AND date=%s",
+                    (c["id"], today))
         if cur.fetchone():
             log.info(f"  Skipping {c['name']} — already traded today")
             continue
 
-        # Scale profit: $8 per $100 of balance
         client_profit   = round((c["balance"] / 100.0) * DAILY_PROFIT_PER_100, 2)
         client_quantity = round(client_profit / price_diff, 6)
 
-        now = datetime.datetime.utcnow()
+        now              = datetime.datetime.utcnow()
         open_minutes_ago = random.randint(30, 90)
-        opened_at = (now - datetime.timedelta(minutes=open_minutes_ago)).isoformat()
-        closed_at = now.isoformat()
-        trade_id  = _uid()
-        sl = round(price * 0.985, 2)
-        tp = close_price
+        opened_at        = (now - datetime.timedelta(minutes=open_minutes_ago)).isoformat()
+        closed_at        = now.isoformat()
+        trade_id         = _uid()
+        sl               = round(price * 0.985, 2)
+        tp               = close_price
 
         cur.execute(
             "INSERT INTO trades(id,user_id,account_id,symbol,direction,"
@@ -336,18 +329,15 @@ def run_daily_trades():
         cur.execute(
             "INSERT INTO daily_trade_log(id,user_id,account_id,trade_id,"
             "profit,date,created_at) VALUES(%s,%s,%s,%s,%s,%s,%s)",
-            (_uid(), c["id"], c["account_id"],
-             trade_id, client_profit, today, _now())
+            (_uid(), c["id"], c["account_id"], trade_id, client_profit, today, _now())
         )
         paid += 1
-        log.info(f"  ✓ {c['name']}: BUY {client_quantity} {TRADE_SYMBOL} "
-                 f"@ ${price:,.2f} → ${close_price:,.2f} = +${client_profit} "
-                 f"(balance: ${c['balance']:,.2f})")
+        log.info(f"  ✓ {c['name']}: +${client_profit} (bal: ${c['balance']:,.2f})")
 
     conn.commit()
     cur.close()
     conn.close()
-    log.info(f"=== Daily trade complete: {paid}/{len(clients)} clients credited ===")
+    log.info(f"=== Done: {paid}/{len(clients)} clients credited ===")
 
 # ── SCHEDULER ─────────────────────────────────────────────────────────────────
 _scheduler_lock    = threading.Lock()
@@ -355,10 +345,7 @@ _scheduler_started = False
 _scheduler_stop    = threading.Event()
 
 def trade_scheduler(stop_event):
-    log.info(
-        f"Trade scheduler started — fires daily at "
-        f"{TRADE_HOUR:02d}:00 UTC ({TRADE_HOUR+3:02d}:00 EAT)"
-    )
+    log.info(f"Scheduler started — fires at {TRADE_HOUR:02d}:00 UTC ({TRADE_HOUR+3:02d}:00 EAT)")
     last_run_date = None
     while not stop_event.is_set():
         try:
@@ -373,7 +360,7 @@ def trade_scheduler(stop_event):
         except Exception as e:
             log.error(f"Scheduler tick error: {e}")
         stop_event.wait(CHECK_INTERVAL)
-    log.info("Trade scheduler stopped")
+    log.info("Scheduler stopped")
 
 def start_scheduler():
     global _scheduler_started
@@ -381,12 +368,8 @@ def start_scheduler():
         if _scheduler_started:
             return
         _scheduler_started = True
-        t = threading.Thread(
-            target=trade_scheduler,
-            args=(_scheduler_stop,),
-            daemon=True,
-            name="TradeScheduler"
-        )
+        t = threading.Thread(target=trade_scheduler, args=(_scheduler_stop,),
+                             daemon=True, name="TradeScheduler")
         t.start()
         log.info("TradeScheduler thread launched ✓")
 
@@ -537,32 +520,60 @@ def client_summary():
 
     cur.execute("SELECT * FROM users WHERE id=%s", (uid,))
     u = cur.fetchone()
+
     cur.execute("SELECT * FROM accounts WHERE user_id=%s", (uid,))
     a = cur.fetchone()
+
     cur.execute(
         "SELECT COALESCE(SUM(amount_usd),0) AS s FROM transactions "
         "WHERE user_id=%s AND type='DEPOSIT' AND status='COMPLETED'", (uid,)
     )
     dep = cur.fetchone()
+
+    # ── FIX: count BOTH withdrawal types, COMPLETED status only ──────────────
     cur.execute(
-        "SELECT COALESCE(SUM(amount_usd),0) AS s FROM transactions "
-        "WHERE user_id=%s AND type='WITHDRAWAL' AND status='COMPLETED'", (uid,)
+        """
+        SELECT COALESCE(SUM(amount_usd), 0) AS s
+        FROM transactions
+        WHERE user_id = %s
+          AND type IN ('WITHDRAWAL', 'REFERRAL_WITHDRAWAL')
+          AND status = 'COMPLETED'
+        """,
+        (uid,)
     )
     wdr = cur.fetchone()
+
+    # ── Also expose pending withdrawals so dashboard can show in-flight funds ─
+    cur.execute(
+        """
+        SELECT COALESCE(SUM(amount_usd), 0) AS s
+        FROM transactions
+        WHERE user_id = %s
+          AND type IN ('WITHDRAWAL', 'REFERRAL_WITHDRAWAL')
+          AND status = 'PENDING'
+        """,
+        (uid,)
+    )
+    wdr_pending = cur.fetchone()
+
     cur.execute("SELECT COUNT(*) AS c FROM referrals WHERE referrer_id=%s", (uid,))
     ref_count = cur.fetchone()
+
     cur.execute(
         "SELECT COALESCE(SUM(commission_usd),0) AS s FROM referrals WHERE referrer_id=%s", (uid,)
     )
     ref_earned = cur.fetchone()
+
     cur.execute(
         "SELECT COUNT(*) AS c FROM trades WHERE user_id=%s AND status='OPEN'", (uid,)
     )
     open_trades = cur.fetchone()
+
     cur.execute(
         "SELECT COALESCE(SUM(profit),0) AS s FROM daily_trade_log WHERE user_id=%s", (uid,)
     )
     total_profit = cur.fetchone()
+
     cur.execute(
         "SELECT COUNT(*) AS c FROM daily_trade_log WHERE user_id=%s", (uid,)
     )
@@ -571,24 +582,25 @@ def client_summary():
     cur.close()
     conn.close()
 
-    balance = a["balance"] if a else 0
+    balance        = a["balance"] if a else 0
     expected_daily = round((balance / 100.0) * DAILY_PROFIT_PER_100, 2)
 
     return ok({
-        "name":              u["name"],
-        "balance":           balance,
-        "equity":            a["equity"]        if a else 0,
-        "total_deposits":    dep["s"],
-        "total_withdrawals": wdr["s"],
-        "ref_balance":       a["ref_balance"]   if a else 0,
-        "ref_code":          u["referral_code"] or "",
-        "ref_count":         ref_count["c"],
-        "ref_earned":        ref_earned["s"],
-        "open_trades":       open_trades["c"],
-        "total_profit":      total_profit["s"],
-        "days_traded":       days_traded["c"],
-        "daily_profit":      expected_daily,
-        "daily_profit_rate": DAILY_PROFIT_PER_100,
+        "name":                u["name"],
+        "balance":             balance,
+        "equity":              a["equity"]       if a else 0,
+        "total_deposits":      dep["s"],
+        "total_withdrawals":   wdr["s"],         # completed withdrawals
+        "pending_withdrawals": wdr_pending["s"], # in-flight withdrawals
+        "ref_balance":         a["ref_balance"]  if a else 0,
+        "ref_code":            u["referral_code"] or "",
+        "ref_count":           ref_count["c"],
+        "ref_earned":          ref_earned["s"],
+        "open_trades":         open_trades["c"],
+        "total_profit":        total_profit["s"],
+        "days_traded":         days_traded["c"],
+        "daily_profit":        expected_daily,
+        "daily_profit_rate":   DAILY_PROFIT_PER_100,
     })
 
 @app.route("/api/client/referrals")
@@ -690,8 +702,7 @@ def client_profit_history():
     conn = get_db()
     cur  = conn.cursor()
     cur.execute(
-        "SELECT * FROM daily_trade_log WHERE user_id=%s "
-        "ORDER BY date DESC LIMIT 30", (uid,)
+        "SELECT * FROM daily_trade_log WHERE user_id=%s ORDER BY date DESC LIMIT 30", (uid,)
     )
     rows = cur.fetchall()
     cur.close(); conn.close()
@@ -736,7 +747,6 @@ def client_deposit_pending():
                "message": "Deposit submitted. Awaiting admin confirmation."})
 
 # ── WITHDRAWAL ────────────────────────────────────────────────────────────────
-# ── WITHDRAWAL ────────────────────────────────────────────────────────────────
 @app.route("/api/client/withdraw", methods=["POST"])
 @login_required
 def client_withdraw():
@@ -777,31 +787,6 @@ def client_withdraw():
     return ok({"reference": ref,
                "message": "Withdrawal submitted. Admin will process within 24hrs."})
 
-
-# ── STATS ENDPOINT (Completely separate from the function above) ──────────────
-@app.route("/api/client/stats/withdrawals", methods=["GET"])
-@login_required
-def get_total_withdrawals():
-    uid = session["user_id"]
-    
-    conn = get_db()
-    cur = conn.cursor()
-    
-    # Sum up all successful withdrawals for this user
-    cur.execute(
-        "SELECT COALESCE(SUM(amount_usd), 0) as total FROM transactions "
-        "WHERE user_id=%s AND type='WITHDRAWAL' AND status='COMPLETED'", 
-        (uid,)
-    )
-    result = cur.fetchone()
-    
-    cur.close()
-    conn.close()
-    
-    # Extract total depending on dictionary-like cursor vs tuple
-    total_amt = float(result["total"] if isinstance(result, dict) else result[0])
-    
-    return ok({"total_withdrawals": total_amt})
 # ── ADMIN API ─────────────────────────────────────────────────────────────────
 @app.route("/api/admin/stats")
 @admin_required
@@ -814,7 +799,8 @@ def admin_stats():
     active = cur.fetchone()["c"]
     cur.execute("SELECT COALESCE(SUM(amount_usd),0) AS s FROM transactions WHERE type='DEPOSIT' AND status='COMPLETED'")
     deposits = cur.fetchone()["s"]
-    cur.execute("SELECT COALESCE(SUM(amount_usd),0) AS s FROM transactions WHERE type='WITHDRAWAL' AND status='COMPLETED'")
+    # FIX: count both withdrawal types
+    cur.execute("SELECT COALESCE(SUM(amount_usd),0) AS s FROM transactions WHERE type IN ('WITHDRAWAL','REFERRAL_WITHDRAWAL') AND status='COMPLETED'")
     withdrawals = cur.fetchone()["s"]
     cur.execute("SELECT COUNT(*) AS c FROM transactions WHERE type='DEPOSIT' AND status='PENDING'")
     pending_dep = cur.fetchone()["c"]
@@ -928,15 +914,15 @@ def admin_approve_withdrawal():
             or tx["status"] != "PENDING"):
         cur.close(); conn.close()
         return err("Pending withdrawal not found")
-    
-    # Only deduct from balance for regular WITHDRAWAL
-    # REFERRAL_WITHDRAWAL already had ref_balance zeroed when requested
+
+    # ── FIX: deduct balance for regular WITHDRAWAL only ───────────────────────
+    # REFERRAL_WITHDRAWAL already zeroed ref_balance when client requested it
     if tx["type"] == "WITHDRAWAL":
         cur.execute(
-            "UPDATE accounts SET balance=balance-%s,equity=equity-%s WHERE user_id=%s",
+            "UPDATE accounts SET balance=balance-%s, equity=equity-%s WHERE user_id=%s",
             (tx["amount_usd"], tx["amount_usd"], tx["user_id"])
         )
-    
+
     cur.execute(
         "UPDATE transactions SET status='COMPLETED',completed_at=%s WHERE id=%s",
         (_now(), txid)
@@ -960,6 +946,14 @@ def admin_reject_withdrawal():
             or tx["status"] != "PENDING"):
         cur.close(); conn.close()
         return err("Pending withdrawal not found")
+
+    # ── FIX: restore ref_balance if referral withdrawal is rejected ───────────
+    if tx["type"] == "REFERRAL_WITHDRAWAL":
+        cur.execute(
+            "UPDATE accounts SET ref_balance=ref_balance+%s WHERE user_id=%s",
+            (tx["amount_usd"], tx["user_id"])
+        )
+
     cur.execute(
         "UPDATE transactions SET status='REJECTED',note=%s,completed_at=%s WHERE id=%s",
         (reason, _now(), txid)
@@ -973,12 +967,20 @@ def admin_reject_withdrawal():
 def admin_clients():
     conn = get_db()
     cur  = conn.cursor()
+    # FIX: added total_deposits, total_withdrawals, total_ref_earned subqueries
     cur.execute(
         "SELECT u.id, u.name, u.email, u.phone, u.referral_code, u.created_at, "
         "a.balance, a.equity, a.ref_balance, "
         "(SELECT COUNT(*) FROM referrals WHERE referrer_id=u.id) AS ref_count, "
         "(SELECT COALESCE(SUM(profit),0) FROM daily_trade_log WHERE user_id=u.id) AS total_profit, "
-        "(SELECT COUNT(*) FROM daily_trade_log WHERE user_id=u.id) AS days_active "
+        "(SELECT COUNT(*) FROM daily_trade_log WHERE user_id=u.id) AS days_active, "
+        "(SELECT COALESCE(SUM(amount_usd),0) FROM transactions "
+        " WHERE user_id=u.id AND type='DEPOSIT' AND status='COMPLETED') AS total_deposits, "
+        "(SELECT COALESCE(SUM(amount_usd),0) FROM transactions "
+        " WHERE user_id=u.id AND type IN ('WITHDRAWAL','REFERRAL_WITHDRAWAL') "
+        " AND status='COMPLETED') AS total_withdrawals, "
+        "(SELECT COALESCE(SUM(commission_usd),0) FROM referrals "
+        " WHERE referrer_id=u.id) AS total_ref_earned "
         "FROM users u LEFT JOIN accounts a ON u.id=a.user_id "
         "WHERE u.role='client' ORDER BY u.created_at DESC"
     )
@@ -1021,7 +1023,7 @@ def admin_adjust_balance(uid):
 @admin_required
 def admin_run_trades():
     threading.Thread(target=run_daily_trades, daemon=True).start()
-    return ok({"message": f"Daily trades triggered — ${DAILY_PROFIT_PER_100} per $100 balance per active client"})
+    return ok({"message": f"Daily trades triggered — ${DAILY_PROFIT_PER_100} per $100 balance"})
 
 @app.route("/api/admin/trade/log")
 @admin_required
@@ -1039,15 +1041,14 @@ def admin_trade_log():
 @app.route("/api/admin/trades")
 @admin_required
 def admin_trades():
-    status = request.args.get("status", "").upper()
+    status = request.args.get("status","").upper()
     conn   = get_db()
     cur    = conn.cursor()
     if status:
         cur.execute(
             "SELECT t.*, u.name AS user_name FROM trades t "
             "JOIN users u ON t.user_id=u.id "
-            "WHERE t.status=%s ORDER BY t.opened_at DESC",
-            (status,)
+            "WHERE t.status=%s ORDER BY t.opened_at DESC", (status,)
         )
     else:
         cur.execute(
@@ -1073,7 +1074,6 @@ def admin_referrals():
     cur.close(); conn.close()
     return ok([dict(r) for r in refs])
 
-# ── SCHEDULER STATUS ──────────────────────────────────────────────────────────
 @app.route("/api/admin/scheduler/status")
 @admin_required
 def scheduler_status():
@@ -1100,14 +1100,14 @@ start_scheduler()
 
 if __name__ == "__main__":
     print("\n" + "="*60)
-    print("   Summit Wealth v5.4 — $8 PROFIT PER $100 BALANCE")
+    print("   Summit Wealth v5.5 — $8 PROFIT PER $100 BALANCE")
     print("="*60)
     print(f"   URL    : http://127.0.0.1:8080")
     print(f"   Client : john@test.com  / demo1234")
     print(f"   Admin  : admin@test.com / admin1234")
     print(f"   Rate   : ${DAILY_PROFIT_PER_100} per $100 balance/day at {TRADE_HOUR:02d}:00 UTC ({TRADE_HOUR+3:02d}:00 EAT)")
     print(f"   Symbol : {TRADE_SYMBOL}")
-    print(f"   Min Dep: $100")
+    print(f"   Min Dep: $100  |  Min Withdrawal: $1,000")
     print(f"   Binance: {'CONNECTED ✓' if bnb else 'fallback prices'}")
     print(f"   TRC20  : {'SET ✓' if MANUAL_WALLETS['TRC20'] else 'NOT SET ✗'}")
     print("="*60 + "\n")

@@ -1,4 +1,3 @@
-
 """
 Summit Wealth v5.5 - $8 PROFIT PER $100 BALANCE (8% daily)
 - Scheduler starts at module level (works with gunicorn on Render)
@@ -1011,13 +1010,41 @@ def admin_adjust_balance(uid):
     cur.execute(
         "INSERT INTO transactions(id,user_id,account_id,type,method,amount_usd,"
         "reference,status,note,created_at,completed_at) "
-        "VALUES(%s,%s,%s,'ADJUSTMENT','MANUAL',%s,%s,'COMPLETED',%s,%s,%s)",
+        "VALUES(%s,%s,%s,'ADJUSTMENT','MANUAL',%s,%s,'COMPLETED',%s,%s)",
         (_uid(), uid, a["id"], abs(amount),
          "ADJ-"+secrets.token_hex(4).upper(), note, _now(), _now())
     )
     conn.commit()
     cur.close(); conn.close()
     return ok({"message": f"Balance adjusted by {amount:+.2f}"})
+
+@app.route("/api/admin/client/<uid>/edit", methods=["POST"])
+@admin_required
+def admin_edit_client(uid):
+    d     = request.json or {}
+    name  = d.get("name","").strip()
+    email = d.get("email","").lower().strip()
+    phone = d.get("phone","").strip()
+    if not name:  return err("Name is required")
+    if not email: return err("Email is required")
+    conn = get_db()
+    cur  = conn.cursor()
+    try:
+        cur.execute("SELECT id FROM users WHERE id=%s", (uid,))
+        if not cur.fetchone():
+            cur.close(); conn.close()
+            return err("Client not found", 404)
+        cur.execute(
+            "UPDATE users SET name=%s, email=%s, phone=%s WHERE id=%s",
+            (name, email, phone, uid)
+        )
+        conn.commit()
+        cur.close(); conn.close()
+        return ok({"message": "Client updated successfully"})
+    except psycopg2.errors.UniqueViolation:
+        conn.rollback()
+        cur.close(); conn.close()
+        return err("That email is already used by another account", 409)
 
 @app.route("/api/admin/trade/run", methods=["POST"])
 @admin_required

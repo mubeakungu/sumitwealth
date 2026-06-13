@@ -374,6 +374,14 @@ const post = (u,b) => api(u,{method:'POST',headers:{'Content-Type':'application/
 const fmt  = n => parseFloat(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtD = n => '$' + fmt(n);
 
+// ── NO-FLASH DOM UPDATE ───────────────────────────────────────────────────────
+// Only writes to the DOM when content has actually changed.
+// Prevents the loading-spinner flash on every 60s auto-refresh.
+function setHTML(el, html) {
+  if (typeof el === 'string') el = document.getElementById(el);
+  if (el && el.innerHTML !== html) el.innerHTML = html;
+}
+
 // ── STATE ─────────────────────────────────────────────────────────────────────
 let allTx = [], allClients = [];
 let txChart, clientChart;
@@ -530,7 +538,7 @@ function renderPending(txData) {
   const pending = txData.filter(t => t.type === 'DEPOSIT' && t.status === 'PENDING');
 
   if (!pending.length) {
-    document.getElementById('pendingList').innerHTML = '<div class="empty">&#9989; No pending deposits. All clear!</div>';
+    setHTML('pendingList', '<div class="empty">&#9989; No pending deposits. All clear!</div>');
     return;
   }
 
@@ -552,7 +560,7 @@ function renderPending(txData) {
     </tr>`;
   });
   html += '</tbody></table>';
-  document.getElementById('pendingList').innerHTML = html;
+  setHTML('pendingList', html);
 }
 
 // ── PENDING WITHDRAWALS ───────────────────────────────────────────────────────
@@ -561,7 +569,7 @@ function renderPendingWithdrawals(txData) {
   const pending = txData.filter(t => (t.type === 'WITHDRAWAL' || t.type === 'REFERRAL_WITHDRAWAL') && t.status === 'PENDING');
 
   if (!pending.length) {
-    document.getElementById('pendingWdrList').innerHTML = '<div class="empty">&#9989; No pending withdrawals. All clear!</div>';
+    setHTML('pendingWdrList', '<div class="empty">&#9989; No pending withdrawals. All clear!</div>');
     return;
   }
 
@@ -599,7 +607,7 @@ function renderPendingWithdrawals(txData) {
   });
 
   html += '</tbody></table>';
-  document.getElementById('pendingWdrList').innerHTML = html;
+  setHTML('pendingWdrList', html);
 }
 
 function copyAddr(addr) {
@@ -610,7 +618,7 @@ function copyAddr(addr) {
 function renderClients(clients) {
   const el = document.getElementById('clientList');
   if (!clients || !clients.length) {
-    el.innerHTML = '<div class="empty">No clients registered yet.</div>';
+    setHTML(el, '<div class="empty">No clients registered yet.</div>');
     document.getElementById('clientTotals').style.display = 'none';
     return;
   }
@@ -662,7 +670,7 @@ function renderClients(clients) {
   });
 
   html += '</tbody></table>';
-  el.innerHTML = html;
+  setHTML(el, html);
 
   document.getElementById('ctBalance').textContent     = fmtD(sumBalance);
   document.getElementById('ctEquity').textContent      = fmtD(sumEquity);
@@ -684,7 +692,7 @@ function filterClients() {
 // ── TRANSACTIONS ──────────────────────────────────────────────────────────────
 function renderTx(txs) {
   const el = document.getElementById('txList');
-  if (!txs || !txs.length) { el.innerHTML = '<div class="empty">No transactions found.</div>'; return; }
+  if (!txs || !txs.length) { setHTML(el, '<div class="empty">No transactions found.</div>'); return; }
   let html = '<table class="tbl"><thead><tr><th>Date</th><th>Client</th><th>Type</th><th>Amount</th><th>Network</th><th>Status</th><th>Reference</th><th>Actions</th></tr></thead><tbody>';
   txs.forEach(t => {
     const tc = t.type === 'DEPOSIT' ? 'type-deposit' : t.type === 'WITHDRAWAL' ? 'type-withdrawal' : t.type === 'REFERRAL_WITHDRAWAL' ? 'type-referral' : 'type-adjustment';
@@ -702,7 +710,7 @@ function renderTx(txs) {
     </tr>`;
   });
   html += '</tbody></table>';
-  el.innerHTML = html;
+  setHTML(el, html);
 }
 
 function filterTx() {
@@ -718,10 +726,10 @@ function filterTx() {
 
 // ── REFERRALS ─────────────────────────────────────────────────────────────────
 async function loadReferrals() {
-  document.getElementById('referralList').innerHTML = '<div class="loading">Loading...</div>';
+  setHTML('referralList', '<div class="loading">Loading...</div>');
   const d = await api('/api/admin/referrals');
   if (!d.success) { showError('Failed to load referrals'); return; }
-  if (!d.data.length) { document.getElementById('referralList').innerHTML = '<div class="empty">No referrals yet.</div>'; return; }
+  if (!d.data.length) { setHTML('referralList', '<div class="empty">No referrals yet.</div>'); return; }
   let html = '<table class="tbl"><thead><tr><th>Date</th><th>Referrer</th><th>Referred User</th><th>Commission</th><th>Status</th></tr></thead><tbody>';
   d.data.forEach(r => {
     html += `<tr>
@@ -733,16 +741,16 @@ async function loadReferrals() {
     </tr>`;
   });
   html += '</tbody></table>';
-  document.getElementById('referralList').innerHTML = html;
+  setHTML('referralList', html);
 }
 
 // ── TRADES ────────────────────────────────────────────────────────────────────
 async function loadTrades() {
-  document.getElementById('tradeList').innerHTML = '<div class="loading">Loading...</div>';
+  setHTML('tradeList', '<div class="loading">Loading...</div>');
   const status = document.getElementById('tradeStatusFilter').value;
   const d = await api('/api/admin/trades' + (status ? '?status=' + status : ''));
   if (!d.success) { showError('Failed to load trades'); return; }
-  if (!d.data.length) { document.getElementById('tradeList').innerHTML = '<div class="empty">No trades found.</div>'; return; }
+  if (!d.data.length) { setHTML('tradeList', '<div class="empty">No trades found.</div>'); return; }
   let html = '<table class="tbl"><thead><tr><th>Opened</th><th>Client</th><th>Symbol</th><th>Direction</th><th>Entry</th><th>Close</th><th>PnL</th><th>Status</th><th>Reason</th></tr></thead><tbody>';
   d.data.forEach(t => {
     const pnlColor = (t.pnl || 0) >= 0 ? '#00e090' : '#ff4560';
@@ -760,7 +768,7 @@ async function loadTrades() {
     </tr>`;
   });
   html += '</tbody></table>';
-  document.getElementById('tradeList').innerHTML = html;
+  setHTML('tradeList', html);
 }
 
 // ── ADJUST ────────────────────────────────────────────────────────────────────

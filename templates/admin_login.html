@@ -14,22 +14,8 @@
       align-items: center;
       justify-content: center;
     }
-
-    .brand {
-      font-size: 22px;
-      font-weight: bold;
-      color: #d4af37;
-      margin-bottom: 8px;
-      letter-spacing: 1px;
-    }
-    .brand-sub {
-      font-size: 12px;
-      color: #555;
-      margin-bottom: 36px;
-      text-transform: uppercase;
-      letter-spacing: 2px;
-    }
-
+    .brand { font-size:22px; font-weight:bold; color:#d4af37; margin-bottom:6px; letter-spacing:1px; }
+    .brand-sub { font-size:11px; color:#555; margin-bottom:32px; text-transform:uppercase; letter-spacing:2px; }
     .card {
       background: #1a1f3a;
       border: 1px solid #d4af37;
@@ -38,101 +24,45 @@
       width: 100%;
       max-width: 400px;
     }
-
-    .card-title {
-      font-size: 15px;
-      font-weight: bold;
-      color: #d4af37;
-      margin-bottom: 6px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .card-sub {
-      font-size: 12px;
-      color: #555;
-      margin-bottom: 28px;
-    }
-
-    .form-group {
+    .lock {
+      text-align: center;
+      font-size: 36px;
       margin-bottom: 18px;
     }
-    .form-group label {
-      display: block;
-      font-size: 11px;
-      color: #aaa;
-      margin-bottom: 6px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-    .form-group input {
-      width: 100%;
-      padding: 11px 14px;
-      background: #0a0e27;
-      border: 1px solid #2a2f4a;
-      color: #fff;
-      border-radius: 6px;
-      font-size: 14px;
-      outline: none;
+    .card-title { font-size:15px; font-weight:bold; color:#d4af37; margin-bottom:4px; }
+    .card-sub   { font-size:12px; color:#555; margin-bottom:26px; }
+    .form-group { margin-bottom:16px; }
+    label { display:block; font-size:11px; color:#aaa; margin-bottom:5px; text-transform:uppercase; letter-spacing:0.5px; }
+    input {
+      width:100%; padding:11px 14px;
+      background:#0a0e27; border:1px solid #2a2f4a;
+      color:#fff; border-radius:6px; font-size:14px; outline:none;
       transition: border-color 0.2s;
     }
-    .form-group input:focus {
-      border-color: #d4af37;
-    }
-
-    .btn-login {
-      width: 100%;
-      padding: 13px;
-      background: #d4af37;
-      color: #0a0e27;
-      border: none;
-      border-radius: 6px;
-      font-size: 14px;
-      font-weight: bold;
-      cursor: pointer;
-      margin-top: 6px;
+    input:focus { border-color:#d4af37; }
+    .btn {
+      width:100%; padding:13px;
+      background:#d4af37; color:#0a0e27;
+      border:none; border-radius:6px;
+      font-size:14px; font-weight:bold;
+      cursor:pointer; margin-top:6px;
       transition: background 0.2s;
     }
-    .btn-login:hover   { background: #c9a430; }
-    .btn-login:disabled { background: #6b5a1e; cursor: not-allowed; }
-
-    .alert {
+    .btn:hover    { background:#c9a430; }
+    .btn:disabled { background:#6b5a1e; cursor:not-allowed; }
+    .error {
+      background: rgba(255,69,96,0.1);
+      border: 1px solid #ff4560;
+      color: #ff4560;
       padding: 10px 14px;
       border-radius: 6px;
       font-size: 12px;
       margin-bottom: 18px;
       display: none;
     }
-    .alert.show { display: block; }
-    .alert-error {
-      background: rgba(255,69,96,0.1);
-      border: 1px solid #ff4560;
-      color: #ff4560;
-    }
-
-    .lock-icon {
-      display: flex;
-      justify-content: center;
-      margin-bottom: 24px;
-    }
-    .lock-icon div {
-      background: rgba(212,175,55,0.1);
-      border: 1px solid rgba(212,175,55,0.3);
-      border-radius: 50%;
-      width: 60px;
-      height: 60px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 26px;
-    }
-
-    .footer-note {
-      margin-top: 20px;
-      font-size: 11px;
-      color: #333;
-      text-align: center;
-    }
+    .back { margin-top:18px; text-align:center; font-size:12px; color:#555; }
+    .back a { color:#d4af37; text-decoration:none; }
+    .footer { margin-top:20px; font-size:11px; color:#333; }
   </style>
 </head>
 <body>
@@ -141,49 +71,42 @@
   <div class="brand-sub">Administration Portal</div>
 
   <div class="card">
-    <div class="lock-icon"><div>&#128737;</div></div>
-    <div class="card-title">&#128272; Admin Sign In</div>
+    <div class="lock">&#128737;</div>
+    <div class="card-title">Admin Sign In</div>
     <div class="card-sub">Restricted access — authorised personnel only</div>
 
-    <div class="alert alert-error" id="errorMsg"></div>
+    <div class="error" id="err"></div>
 
     <div class="form-group">
-      <label>Admin Email</label>
-      <input type="email" id="email" placeholder="admin@example.com" autocomplete="username">
+      <label>Email</label>
+      <input type="email" id="email" placeholder="admin@example.com" autocomplete="username" autofocus>
     </div>
     <div class="form-group">
       <label>Password</label>
-      <input type="password" id="password" placeholder="••••••••" autocomplete="current-password">
+      <input type="password" id="pass" placeholder="••••••••" autocomplete="current-password">
     </div>
 
-    <button class="btn-login" id="loginBtn" onclick="doLogin()">Sign In</button>
+    <button class="btn" id="btn" onclick="login()">Sign In</button>
+
+    <div class="back"><a href="/">&#8592; Back to client login</a></div>
   </div>
 
-  <div class="footer-note">&#128274; Secure admin session &nbsp;|&nbsp; Summit Wealth &copy; 2025</div>
+  <div class="footer">&#128274; Secure session &nbsp;|&nbsp; Summit Wealth &copy; 2025</div>
 
 <script>
-  // Allow Enter key to submit
-  document.addEventListener('keydown', e => {
-    if (e.key === 'Enter') doLogin();
-  });
+  document.addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
 
-  function showError(msg) {
-    const el = document.getElementById('errorMsg');
-    el.textContent = '✗ ' + msg;
-    el.classList.add('show');
-  }
-  function hideError() {
-    document.getElementById('errorMsg').classList.remove('show');
-  }
+  async function login() {
+    const btn = document.getElementById('btn');
+    const err = document.getElementById('err');
+    err.style.display = 'none';
 
-  async function doLogin() {
-    hideError();
-    const email    = document.getElementById('email').value.trim();
-    const password = document.getElementById('password').value;
-    const btn      = document.getElementById('loginBtn');
+    const email = document.getElementById('email').value.trim();
+    const pass  = document.getElementById('pass').value;
 
-    if (!email || !password) {
-      showError('Please enter your email and password.');
+    if (!email || !pass) {
+      err.textContent  = '✗ Please enter your email and password.';
+      err.style.display = 'block';
       return;
     }
 
@@ -191,25 +114,26 @@
     btn.textContent = 'Signing in…';
 
     try {
-      const res = await fetch('/api/auth/login', {
+      const r = await fetch('/api/auth/login', {
         method:      'POST',
         credentials: 'same-origin',
         headers:     { 'Content-Type': 'application/json' },
-        body:        JSON.stringify({ email, password, admin: true }),
+        body:        JSON.stringify({ email, password: pass, admin: true })
       });
+      const d = await r.json();
 
-      const data = await res.json();
-
-      if (data.success) {
+      if (d.success) {
         btn.textContent = '✓ Redirecting…';
-        window.location.href = data.data.redirect || '/admin/dashboard';
+        window.location.href = d.data.redirect || '/admin/dashboard';
       } else {
-        showError(data.error || 'Login failed. Check your credentials.');
+        err.textContent  = '✗ ' + (d.error || 'Login failed.');
+        err.style.display = 'block';
         btn.disabled    = false;
         btn.textContent = 'Sign In';
       }
     } catch (e) {
-      showError('Network error. Please try again.');
+      err.textContent  = '✗ Network error. Please try again.';
+      err.style.display = 'block';
       btn.disabled    = false;
       btn.textContent = 'Sign In';
     }

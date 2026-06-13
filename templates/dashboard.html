@@ -560,7 +560,8 @@
     document.getElementById('refWithdrawBal').textContent= fmt(refBal);
 
     const code = s.ref_code||'';
-    const link = window.location.origin+'/register?ref='+code;
+    const BASE_URL = 'https://www.sumitwealthfx.space';
+    const link = BASE_URL+'/register?ref='+code;
     document.getElementById('refCode').textContent = code;
     document.getElementById('refLink').textContent = link;
 

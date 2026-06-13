@@ -54,6 +54,7 @@
     .form-group { margin-bottom:14px; }
     .form-group label { display:block; font-size:11px; color:#aaa; margin-bottom:5px; }
     .form-group input, .form-group select, .form-group textarea { width:100%; padding:9px 12px; background:#0a0e27; border:1px solid #333; color:#fff; border-radius:5px; font-size:13px; }
+    .form-group input:focus, .form-group textarea:focus { outline:none; border-color:#d4af37; }
     .form-group textarea { resize:vertical; height:80px; }
     .modal-btns { display:flex; gap:10px; margin-top:18px; justify-content:flex-end; }
     .alert { padding:10px 14px; border-radius:5px; margin-bottom:14px; font-size:12px; display:none; }
@@ -69,7 +70,6 @@
     .client-totals { display:flex; gap:18px; flex-wrap:wrap; margin-top:16px; padding-top:14px; border-top:1px solid #2a2f4a; }
     .ct-item { font-size:12px; }
     .ct-label { color:#666; margin-right:4px; }
-    .refresh-bar { display:flex; justify-content:flex-end; align-items:center; gap:10px; margin-bottom:10px; font-size:11px; color:#555; }
     .wallet-check-bar { display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; flex-wrap:wrap; gap:10px; }
     .wallet-links { display:flex; gap:8px; flex-wrap:wrap; }
     .wallet-link { display:inline-flex; align-items:center; gap:5px; padding:6px 14px; background:rgba(212,175,55,0.08); border:1px solid #d4af37; color:#d4af37; border-radius:5px; font-size:11px; text-decoration:none; transition:background 0.2s; }
@@ -331,6 +331,7 @@
     <p style="color:#aaa;font-size:13px;margin-bottom:18px;">Send the exact USDT to the client's wallet, then click Approve.</p>
     <div style="background:#0a0e27;border:1px solid #2a2f4a;border-radius:6px;padding:14px;margin-bottom:18px;font-size:13px;line-height:2.2;">
       <div><span style="color:#aaa;">Client:</span> <strong id="wdrModalClientName"></strong></div>
+      <div><span style="color:#aaa;">Type:</span> <span id="wdrModalTypeBadge"></span></div>
       <div><span style="color:#aaa;">Amount:</span> <span id="wdrModalAmount" style="font-size:17px;font-weight:bold;"></span> <span style="color:#aaa;font-size:11px;">USDT</span></div>
       <div><span style="color:#aaa;">Network:</span> <span id="wdrModalNetwork" style="color:#d4af37;font-weight:bold;"></span></div>
       <div>
@@ -368,15 +369,45 @@
   </div>
 </div>
 
+<!-- EDIT CLIENT MODAL -->
+<div class="modal-overlay" id="editClientModal">
+  <div class="modal">
+    <h3>&#9998; Edit Client Details</h3>
+    <p style="color:#aaa;font-size:13px;margin-bottom:18px;">
+      Update the client's name, email or phone number.
+    </p>
+    <input type="hidden" id="editClientId">
+    <div class="form-group">
+      <label>Full Name</label>
+      <input type="text" id="editClientName" placeholder="Full name">
+    </div>
+    <div class="form-group">
+      <label>Email Address</label>
+      <input type="email" id="editClientEmail" placeholder="email@example.com">
+    </div>
+    <div class="form-group">
+      <label>Phone Number</label>
+      <input type="text" id="editClientPhone" placeholder="+254 7xx xxx xxx">
+    </div>
+    <div class="alert alert-error"   id="editClientErr"></div>
+    <div class="alert alert-success" id="editClientOk"></div>
+    <div class="modal-btns">
+      <button class="btn" style="background:#333;color:#aaa;"
+              onclick="closeModal('editClientModal')">Cancel</button>
+      <button class="btn btn-gold" onclick="saveClientEdit()">
+        &#9989; Save Changes
+      </button>
+    </div>
+  </div>
+</div>
+
 <script>
 const api  = (url,opts={}) => fetch(url,{credentials:'same-origin',...opts}).then(r=>r.json());
 const post = (u,b) => api(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
 const fmt  = n => parseFloat(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtD = n => '$' + fmt(n);
 
-// ── NO-FLASH DOM UPDATE ───────────────────────────────────────────────────────
-// Only writes to the DOM when content has actually changed.
-// Prevents the loading-spinner flash on every 60s auto-refresh.
+// Only updates DOM when content actually changed — prevents flash on refresh
 function setHTML(el, html) {
   if (typeof el === 'string') el = document.getElementById(el);
   if (el && el.innerHTML !== html) el.innerHTML = html;
@@ -414,7 +445,6 @@ function switchTab(btn, name) {
   document.getElementById(name).classList.add('show');
   btn.classList.add('active');
   activeTab = name;
-
   if (name === 'pending')      renderPending(allTx);
   if (name === 'pendingWdr')   renderPendingWithdrawals(allTx);
   if (name === 'clients')      renderClients(allClients);
@@ -446,9 +476,8 @@ async function loadStats() {
   if (s.pending_withdrawals > 0) { wc.textContent = s.pending_withdrawals; wc.style.display = 'inline'; }
   else wc.style.display = 'none';
 
-  const now = new Date();
   document.getElementById('lastRefreshed').textContent =
-    'Last updated: ' + now.toLocaleTimeString();
+    'Last updated: ' + new Date().toLocaleTimeString();
 }
 
 // ── WALLET LINKS ──────────────────────────────────────────────────────────────
@@ -502,8 +531,7 @@ function buildCharts(transactions, clients) {
       ]
     },
     options: {
-      responsive: true,
-      animation: false,
+      responsive: true, animation: false,
       plugins: { legend: { labels: { color: '#aaa', font: { size: 11 }, boxWidth: 12 } }, tooltip: { callbacks: { label: c => '$' + fmt(c.parsed.y) } } },
       scales: { x: { ticks: { font: { size: 9 } }, grid: { color: '#1e2440' } }, y: { ticks: { callback: v => '$' + fmt(v), font: { size: 9 } }, grid: { color: '#1e2440' } } }
     }
@@ -519,13 +547,9 @@ function buildCharts(transactions, clients) {
   if (clientChart) clientChart.destroy();
   clientChart = new Chart(document.getElementById('clientChart').getContext('2d'), {
     type: 'line',
-    data: {
-      labels: dayLabels,
-      datasets: [{ data: cumData, borderColor: '#d4af37', backgroundColor: 'rgba(212,175,55,0.08)', borderWidth: 2, pointRadius: 3, pointBackgroundColor: '#d4af37', fill: true, tension: 0.4 }]
-    },
+    data: { labels: dayLabels, datasets: [{ data: cumData, borderColor: '#d4af37', backgroundColor: 'rgba(212,175,55,0.08)', borderWidth: 2, pointRadius: 3, pointBackgroundColor: '#d4af37', fill: true, tension: 0.4 }] },
     options: {
-      responsive: true,
-      animation: false,
+      responsive: true, animation: false,
       plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => c.parsed.y + ' clients' } } },
       scales: { x: { ticks: { font: { size: 9 }, maxTicksLimit: 6 }, grid: { color: '#1e2440' } }, y: { ticks: { font: { size: 9 }, stepSize: 1 }, grid: { color: '#1e2440' } } }
     }
@@ -533,15 +557,12 @@ function buildCharts(transactions, clients) {
 }
 
 // ── PENDING DEPOSITS ──────────────────────────────────────────────────────────
-// FIX: pure render function — accepts already-fetched data, no internal fetch
 function renderPending(txData) {
   const pending = txData.filter(t => t.type === 'DEPOSIT' && t.status === 'PENDING');
-
   if (!pending.length) {
     setHTML('pendingList', '<div class="empty">&#9989; No pending deposits. All clear!</div>');
     return;
   }
-
   let html = '<table class="tbl"><thead><tr><th>Date</th><th>Client</th><th>Amount</th><th>Network</th><th>Address Sent From</th><th>Reference</th><th>Actions</th></tr></thead><tbody>';
   pending.forEach(t => {
     const addr = (t.deposit_address || '—');
@@ -564,20 +585,16 @@ function renderPending(txData) {
 }
 
 // ── PENDING WITHDRAWALS ───────────────────────────────────────────────────────
-// FIX: pure render function — accepts already-fetched data, no internal fetch
 function renderPendingWithdrawals(txData) {
   const pending = txData.filter(t => (t.type === 'WITHDRAWAL' || t.type === 'REFERRAL_WITHDRAWAL') && t.status === 'PENDING');
-
   if (!pending.length) {
     setHTML('pendingWdrList', '<div class="empty">&#9989; No pending withdrawals. All clear!</div>');
     return;
   }
-
   let html = `<table class="tbl"><thead><tr>
     <th>Date</th><th>Client</th><th>Type</th><th>Amount to Send</th>
     <th>Network</th><th>Send USDT To</th><th>Reference</th><th>Actions</th>
   </tr></thead><tbody>`;
-
   pending.forEach(t => {
     const addr      = (t.deposit_address || '—');
     const addrShort = addr.length > 24 ? addr.substring(0, 24) + '...' : addr;
@@ -590,7 +607,6 @@ function renderPendingWithdrawals(txData) {
       ? `<span style="font-family:monospace;font-size:10px;color:#d4af37;" title="${addr}">${addrShort}</span>
          <button onclick="copyAddr('${addr}')" style="margin-left:6px;padding:2px 7px;background:#333;border:1px solid #555;color:#aaa;border-radius:3px;cursor:pointer;font-size:10px;">&#128203;</button>`
       : '<span style="color:#ff4560;font-size:11px;">No address!</span>';
-
     html += `<tr>
       <td style="color:#aaa;font-size:11px;">${(t.created_at || '').substring(0, 16).replace('T', ' ')}</td>
       <td><div style="font-weight:bold;">${t.user_name || '—'}</div><div style="font-size:10px;color:#555;">${t.user_email || ''}</div></td>
@@ -600,12 +616,11 @@ function renderPendingWithdrawals(txData) {
       <td>${addrCell}</td>
       <td style="font-size:11px;color:#555;">${t.reference || '—'}</td>
       <td><div style="display:flex;gap:6px;">
-        <button class="btn-sm btn-green" onclick="openApproveWdrModal('${t.id}','${esc(t.user_name)}','${fmt(t.amount_usd)}','${t.method || ''}','${esc(addr)}','${t.reference || ''}')">&#9989; Approve</button>
+        <button class="btn-sm btn-green" onclick="openApproveWdrModal('${t.id}','${esc(t.user_name)}','${fmt(t.amount_usd)}','${t.method || ''}','${esc(addr)}','${t.reference || ''}','${isRef?'REFERRAL':'ACCOUNT'}')">&#9989; Approve</button>
         <button class="btn-sm btn-danger" onclick="openRejectWdrModal('${t.id}')">&#10060; Reject</button>
       </div></td>
     </tr>`;
   });
-
   html += '</tbody></table>';
   setHTML('pendingWdrList', html);
 }
@@ -622,14 +637,13 @@ function renderClients(clients) {
     document.getElementById('clientTotals').style.display = 'none';
     return;
   }
-
   let html = `<table class="tbl"><thead><tr>
     <th>#</th><th>Name</th><th>Email</th><th>Phone</th>
     <th>Balance</th><th>Equity</th>
     <th>Total Deposits</th><th>Total Withdrawals</th>
     <th>Trade Profits</th><th>Ref Earned</th><th>Ref Balance</th>
     <th>Referrals</th><th>Days Active</th><th>Total Generated</th>
-    <th>Ref Code</th><th>Joined</th>
+    <th>Ref Code</th><th>Joined</th><th>Edit</th>
   </tr></thead><tbody>`;
 
   let sumBalance = 0, sumEquity = 0, sumDeposits = 0, sumWithdrawals = 0,
@@ -666,6 +680,13 @@ function renderClients(clients) {
       <td style="color:#ffc800;font-weight:bold;">${fmtD(gen)}</td>
       <td style="font-family:monospace;font-size:11px;color:#aaa;">${c.referral_code || '—'}</td>
       <td style="color:#555;font-size:11px;">${(c.created_at || '').substring(0, 10)}</td>
+      <td>
+        <button class="btn-sm"
+          style="background:rgba(212,175,55,0.1);border:1px solid #d4af37;color:#d4af37;"
+          onclick="openEditClientModal('${c.id}','${esc(c.name||'')}','${esc(c.email||'')}','${esc(c.phone||'')}')">
+          &#9998; Edit
+        </button>
+      </td>
     </tr>`;
   });
 
@@ -691,13 +712,13 @@ function filterClients() {
 
 // ── TRANSACTIONS ──────────────────────────────────────────────────────────────
 function renderTx(txs) {
-  const el = document.getElementById('txList');
-  if (!txs || !txs.length) { setHTML(el, '<div class="empty">No transactions found.</div>'); return; }
+  if (!txs || !txs.length) { setHTML('txList', '<div class="empty">No transactions found.</div>'); return; }
   let html = '<table class="tbl"><thead><tr><th>Date</th><th>Client</th><th>Type</th><th>Amount</th><th>Network</th><th>Status</th><th>Reference</th><th>Actions</th></tr></thead><tbody>';
   txs.forEach(t => {
     const tc = t.type === 'DEPOSIT' ? 'type-deposit' : t.type === 'WITHDRAWAL' ? 'type-withdrawal' : t.type === 'REFERRAL_WITHDRAWAL' ? 'type-referral' : 'type-adjustment';
     const bc = t.status === 'COMPLETED' ? 'badge-completed' : t.status === 'PENDING' ? 'badge-pending' : 'badge-rejected';
     const showApprove = (t.type === 'WITHDRAWAL' || t.type === 'REFERRAL_WITHDRAWAL') && t.status === 'PENDING';
+    const isRef = t.type === 'REFERRAL_WITHDRAWAL';
     html += `<tr>
       <td style="color:#aaa;font-size:11px;">${(t.created_at || '').substring(0, 16).replace('T', ' ')}</td>
       <td style="font-weight:bold;">${t.user_name || '—'}</td>
@@ -706,11 +727,13 @@ function renderTx(txs) {
       <td style="color:#aaa;font-size:11px;">${t.method || '—'}</td>
       <td><span class="badge ${bc}">${t.status}</span></td>
       <td style="color:#555;font-size:11px;">${t.reference || '—'}</td>
-      <td>${showApprove ? `<button class="btn-sm btn-green" onclick="openApproveWdrModal('${t.id}','${esc(t.user_name)}','${fmt(t.amount_usd)}','${t.method || ''}','${esc(t.deposit_address || '')}','${t.reference || ''}')">&#9989; Approve</button>` : '<span style="color:#333;">—</span>'}</td>
+      <td>${showApprove
+        ? `<button class="btn-sm btn-green" onclick="openApproveWdrModal('${t.id}','${esc(t.user_name)}','${fmt(t.amount_usd)}','${t.method || ''}','${esc(t.deposit_address || '')}','${t.reference || ''}','${isRef?'REFERRAL':'ACCOUNT'}')">&#9989; Approve</button>`
+        : '<span style="color:#333;">—</span>'}</td>
     </tr>`;
   });
   html += '</tbody></table>';
-  setHTML(el, html);
+  setHTML('txList', html);
 }
 
 function filterTx() {
@@ -785,15 +808,52 @@ async function submitAdjust() {
   const uid    = document.getElementById('adjustClient').value;
   const amount = parseFloat(document.getElementById('adjustAmount').value || 0);
   const note   = document.getElementById('adjustNote').value.trim();
-  if (!uid)   { showError('Select a client', 'adjustError'); return; }
+  if (!uid)    { showError('Select a client', 'adjustError'); return; }
   if (!amount) { showError('Enter an amount', 'adjustError'); return; }
-  if (!note)  { showError('Enter a reason', 'adjustError'); return; }
+  if (!note)   { showError('Enter a reason',  'adjustError'); return; }
   const d = await post(`/api/admin/client/${uid}/adjust`, { amount, note });
   if (!d.success) { showError(d.error, 'adjustError'); return; }
   showSuccess(d.data.message, 'adjustSuccess');
   document.getElementById('adjustAmount').value = '';
   document.getElementById('adjustNote').value   = '';
   await refreshData();
+}
+
+// ── EDIT CLIENT ───────────────────────────────────────────────────────────────
+function openEditClientModal(uid, name, email, phone) {
+  document.getElementById('editClientId').value    = uid;
+  document.getElementById('editClientName').value  = name;
+  document.getElementById('editClientEmail').value = email;
+  document.getElementById('editClientPhone').value = phone;
+  document.getElementById('editClientErr').classList.remove('show');
+  document.getElementById('editClientOk').classList.remove('show');
+  document.getElementById('editClientModal').classList.add('show');
+}
+
+async function saveClientEdit() {
+  const uid   = document.getElementById('editClientId').value;
+  const name  = document.getElementById('editClientName').value.trim();
+  const email = document.getElementById('editClientEmail').value.trim();
+  const phone = document.getElementById('editClientPhone').value.trim();
+
+  if (!name)  { showError('Name is required',  'editClientErr'); return; }
+  if (!email) { showError('Email is required', 'editClientErr'); return; }
+
+  const d = await post(`/api/admin/client/${uid}/edit`, { name, email, phone });
+
+  if (!d.success) {
+    showError(d.error || 'Update failed', 'editClientErr');
+    return;
+  }
+
+  const okEl = document.getElementById('editClientOk');
+  okEl.textContent = '✓ ' + d.data.message;
+  okEl.classList.add('show');
+
+  setTimeout(async () => {
+    closeModal('editClientModal');
+    await refreshData();
+  }, 1500);
 }
 
 // ── MODALS ────────────────────────────────────────────────────────────────────
@@ -815,13 +875,18 @@ function openRejectModal(txId) {
   document.getElementById('rejectModal').classList.add('show');
 }
 
-function openApproveWdrModal(txId, name, amount, network, address, ref) {
+function openApproveWdrModal(txId, name, amount, network, address, ref, type) {
   document.getElementById('wdrModalTxId').value = txId;
   document.getElementById('wdrModalClientName').textContent = name;
   document.getElementById('wdrModalAmount').textContent = '$' + amount;
   document.getElementById('wdrModalNetwork').textContent = network;
   document.getElementById('wdrModalAddress').textContent = address;
   document.getElementById('wdrModalRef').textContent = ref;
+  // show type badge inside modal
+  const isRef = type === 'REFERRAL';
+  document.getElementById('wdrModalTypeBadge').innerHTML = isRef
+    ? `<span style="background:rgba(167,139,250,0.15);border:1px solid #a78bfa;color:#a78bfa;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:bold;">&#127381; REFERRAL — 16% commission</span>`
+    : `<span style="background:rgba(255,69,96,0.15);border:1px solid #ff4560;color:#ff4560;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:bold;">&#128181; ACCOUNT withdrawal</span>`;
   document.getElementById('approveWdrModal').classList.add('show');
 }
 
@@ -837,8 +902,6 @@ document.querySelectorAll('.modal-overlay').forEach(o => {
   o.addEventListener('click', e => { if (e.target === o) o.classList.remove('show'); });
 });
 
-// FIX: modal confirm functions no longer call tab loaders themselves —
-// refreshData() handles everything in one pass, preventing double renders.
 async function confirmApprove() {
   const txId = document.getElementById('modalTxId').value;
   const d = await post('/api/admin/deposit/approve', { tx_id: txId });
@@ -877,37 +940,29 @@ async function confirmWdrReject() {
   await refreshData();
 }
 
-// ── BACKGROUND REFRESH ────────────────────────────────────────────────────────
-// FIX: single source of truth — fetches fresh data once, updates state,
-// then renders only the active tab. No duplicate fetches or double renders.
+// ── REFRESH ───────────────────────────────────────────────────────────────────
 async function refreshData() {
   await loadStats();
-
   const [txRes, clientRes] = await Promise.all([
     api('/api/admin/transactions'),
     api('/api/admin/clients'),
   ]);
-
   if (txRes.success)     allTx      = txRes.data;
   if (clientRes.success) allClients = clientRes.data;
 
-  // Render only the currently visible tab using the freshly updated state
   if (activeTab === 'pending')      renderPending(allTx);
   if (activeTab === 'pendingWdr')   renderPendingWithdrawals(allTx);
   if (activeTab === 'clients')      renderClients(allClients);
   if (activeTab === 'transactions') renderTx(allTx);
-  // referrals / trades have their own fetch; user revisits tab to refresh
 }
 
 // ── INIT ──────────────────────────────────────────────────────────────────────
 async function init() {
   await loadStats();
-
   const [txRes, clientRes] = await Promise.all([
     api('/api/admin/transactions'),
     api('/api/admin/clients'),
   ]);
-
   if (txRes.success)     allTx      = txRes.data;
   if (clientRes.success) allClients = clientRes.data;
 
@@ -916,7 +971,6 @@ async function init() {
   populateAdjustClients();
   loadWalletLinks();
 
-  // Auto-refresh every 60s — only redraws the active tab
   setInterval(refreshData, 60000);
 }
 

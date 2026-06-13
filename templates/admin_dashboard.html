@@ -377,7 +377,7 @@ const fmtD = n => '$' + fmt(n);
 // ── STATE ─────────────────────────────────────────────────────────────────────
 let allTx = [], allClients = [];
 let txChart, clientChart;
-let activeTab = 'pending';   // track which tab is showing — FIX: only refresh active tab
+let activeTab = 'pending';
 
 // ── LOGOUT ────────────────────────────────────────────────────────────────────
 async function logout() {
@@ -400,7 +400,6 @@ function showError(msg, id='globalError') {
 }
 
 // ── TABS ──────────────────────────────────────────────────────────────────────
-// FIX: track activeTab so the interval only refreshes what's visible
 function switchTab(btn, name) {
   document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('show'));
   document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
@@ -408,9 +407,8 @@ function switchTab(btn, name) {
   btn.classList.add('active');
   activeTab = name;
 
-  // Load content for the tab that was just clicked
-  if (name === 'pending')      loadPending();
-  if (name === 'pendingWdr')   loadPendingWithdrawals();
+  if (name === 'pending')      renderPending(allTx);
+  if (name === 'pendingWdr')   renderPendingWithdrawals(allTx);
   if (name === 'clients')      renderClients(allClients);
   if (name === 'transactions') renderTx(allTx);
   if (name === 'referrals')    loadReferrals();
@@ -440,7 +438,6 @@ async function loadStats() {
   if (s.pending_withdrawals > 0) { wc.textContent = s.pending_withdrawals; wc.style.display = 'inline'; }
   else wc.style.display = 'none';
 
-  // update "last refreshed" timestamp quietly in navbar
   const now = new Date();
   document.getElementById('lastRefreshed').textContent =
     'Last updated: ' + now.toLocaleTimeString();
@@ -498,7 +495,7 @@ function buildCharts(transactions, clients) {
     },
     options: {
       responsive: true,
-      animation: false,   // FIX: no animation on auto-refresh (prevents flicker)
+      animation: false,
       plugins: { legend: { labels: { color: '#aaa', font: { size: 11 }, boxWidth: 12 } }, tooltip: { callbacks: { label: c => '$' + fmt(c.parsed.y) } } },
       scales: { x: { ticks: { font: { size: 9 } }, grid: { color: '#1e2440' } }, y: { ticks: { callback: v => '$' + fmt(v), font: { size: 9 } }, grid: { color: '#1e2440' } } }
     }
@@ -520,7 +517,7 @@ function buildCharts(transactions, clients) {
     },
     options: {
       responsive: true,
-      animation: false,   // FIX: no flicker on refresh
+      animation: false,
       plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => c.parsed.y + ' clients' } } },
       scales: { x: { ticks: { font: { size: 9 }, maxTicksLimit: 6 }, grid: { color: '#1e2440' } }, y: { ticks: { font: { size: 9 }, stepSize: 1 }, grid: { color: '#1e2440' } } }
     }
@@ -528,11 +525,9 @@ function buildCharts(transactions, clients) {
 }
 
 // ── PENDING DEPOSITS ──────────────────────────────────────────────────────────
-async function loadPending() {
-  document.getElementById('pendingList').innerHTML = '<div class="loading">Loading...</div>';
-  const d = await api('/api/admin/transactions');
-  if (!d.success) { showError('Failed to load'); return; }
-  const pending = d.data.filter(t => t.type === 'DEPOSIT' && t.status === 'PENDING');
+// FIX: pure render function — accepts already-fetched data, no internal fetch
+function renderPending(txData) {
+  const pending = txData.filter(t => t.type === 'DEPOSIT' && t.status === 'PENDING');
 
   if (!pending.length) {
     document.getElementById('pendingList').innerHTML = '<div class="empty">&#9989; No pending deposits. All clear!</div>';
@@ -561,11 +556,9 @@ async function loadPending() {
 }
 
 // ── PENDING WITHDRAWALS ───────────────────────────────────────────────────────
-async function loadPendingWithdrawals() {
-  document.getElementById('pendingWdrList').innerHTML = '<div class="loading">Loading...</div>';
-  const d = await api('/api/admin/transactions');
-  if (!d.success) { showError('Failed to load'); return; }
-  const pending = d.data.filter(t => (t.type === 'WITHDRAWAL' || t.type === 'REFERRAL_WITHDRAWAL') && t.status === 'PENDING');
+// FIX: pure render function — accepts already-fetched data, no internal fetch
+function renderPendingWithdrawals(txData) {
+  const pending = txData.filter(t => (t.type === 'WITHDRAWAL' || t.type === 'REFERRAL_WITHDRAWAL') && t.status === 'PENDING');
 
   if (!pending.length) {
     document.getElementById('pendingWdrList').innerHTML = '<div class="empty">&#9989; No pending withdrawals. All clear!</div>';
@@ -792,8 +785,7 @@ async function submitAdjust() {
   showSuccess(d.data.message, 'adjustSuccess');
   document.getElementById('adjustAmount').value = '';
   document.getElementById('adjustNote').value   = '';
-  // Refresh data silently
-  refreshData();
+  await refreshData();
 }
 
 // ── MODALS ────────────────────────────────────────────────────────────────────
@@ -837,6 +829,8 @@ document.querySelectorAll('.modal-overlay').forEach(o => {
   o.addEventListener('click', e => { if (e.target === o) o.classList.remove('show'); });
 });
 
+// FIX: modal confirm functions no longer call tab loaders themselves —
+// refreshData() handles everything in one pass, preventing double renders.
 async function confirmApprove() {
   const txId = document.getElementById('modalTxId').value;
   const d = await post('/api/admin/deposit/approve', { tx_id: txId });
@@ -844,10 +838,6 @@ async function confirmApprove() {
   if (!d.success) { showError(d.error); return; }
   showSuccess(d.data.message);
   await refreshData();
-  // FIX: only reload the active tab's content, not all tabs
-  if (activeTab === 'pending')      loadPending();
-  if (activeTab === 'transactions') renderTx(allTx);
-  if (activeTab === 'clients')      renderClients(allClients);
 }
 
 async function confirmReject() {
@@ -858,8 +848,6 @@ async function confirmReject() {
   if (!d.success) { showError(d.error); return; }
   showSuccess('Deposit rejected.');
   await refreshData();
-  if (activeTab === 'pending')      loadPending();
-  if (activeTab === 'transactions') renderTx(allTx);
 }
 
 async function confirmWdrApprove() {
@@ -869,9 +857,6 @@ async function confirmWdrApprove() {
   if (!d.success) { showError(d.error); return; }
   showSuccess('Withdrawal approved.');
   await refreshData();
-  if (activeTab === 'pendingWdr')   loadPendingWithdrawals();
-  if (activeTab === 'transactions') renderTx(allTx);
-  if (activeTab === 'clients')      renderClients(allClients);
 }
 
 async function confirmWdrReject() {
@@ -882,14 +867,13 @@ async function confirmWdrReject() {
   if (!d.success) { showError(d.error); return; }
   showSuccess('Withdrawal rejected.');
   await refreshData();
-  if (activeTab === 'pendingWdr')   loadPendingWithdrawals();
-  if (activeTab === 'transactions') renderTx(allTx);
 }
 
 // ── BACKGROUND REFRESH ────────────────────────────────────────────────────────
-// FIX: fetch new data silently, only redraw the ACTIVE tab — no full-page rebuild
+// FIX: single source of truth — fetches fresh data once, updates state,
+// then renders only the active tab. No duplicate fetches or double renders.
 async function refreshData() {
-  await loadStats();  // always refresh stats numbers
+  await loadStats();
 
   const [txRes, clientRes] = await Promise.all([
     api('/api/admin/transactions'),
@@ -899,12 +883,12 @@ async function refreshData() {
   if (txRes.success)     allTx      = txRes.data;
   if (clientRes.success) allClients = clientRes.data;
 
-  // Only re-render the currently visible tab
-  if (activeTab === 'pending')      loadPending();
-  if (activeTab === 'pendingWdr')   loadPendingWithdrawals();
+  // Render only the currently visible tab using the freshly updated state
+  if (activeTab === 'pending')      renderPending(allTx);
+  if (activeTab === 'pendingWdr')   renderPendingWithdrawals(allTx);
   if (activeTab === 'clients')      renderClients(allClients);
   if (activeTab === 'transactions') renderTx(allTx);
-  // referrals/trades/adjust: user must manually visit those tabs to refresh
+  // referrals / trades have their own fetch; user revisits tab to refresh
 }
 
 // ── INIT ──────────────────────────────────────────────────────────────────────
@@ -919,14 +903,12 @@ async function init() {
   if (txRes.success)     allTx      = txRes.data;
   if (clientRes.success) allClients = clientRes.data;
 
-  // Load the default tab (pending deposits)
-  loadPending();
+  renderPending(allTx);
   buildCharts(allTx, allClients);
   populateAdjustClients();
   loadWalletLinks();
 
-  // FIX: auto-refresh every 60s (was 30s) — only refreshes active tab
-  // Stats numbers always update; DOM only rebuilds for the visible panel
+  // Auto-refresh every 60s — only redraws the active tab
   setInterval(refreshData, 60000);
 }
 

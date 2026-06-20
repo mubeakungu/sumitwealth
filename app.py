@@ -1149,4 +1149,4 @@ if __name__ == "__main__":
     print(f"   TRC20  : {'SET ✓' if MANUAL_WALLETS['TRC20'] else 'NOT SET ✗'}")
     print("="*60 + "\n")
     app.run(debug=False, port=8080, host="0.0.0.0")
-Done
+

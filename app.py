@@ -13,6 +13,7 @@ Summit Wealth v5.5 - $8 PROFIT PER $100 BALANCE (8% daily)
             both WITHDRAWAL and REFERRAL_WITHDRAWAL counted
             referral withdrawal rejection now restores ref_balance
             admin clients list now includes total_deposits/withdrawals
+- FIX v5.6: referral withdrawal now requires referred user to have made a deposit
 """
 
 import os, hashlib, secrets, datetime, uuid, logging, threading, random
@@ -636,6 +637,15 @@ def client_referral_withdraw():
     cur.execute("SELECT * FROM accounts WHERE user_id=%s", (uid,))
     a = cur.fetchone()
 
+    # ── NEW: Check if user has any valid referrals (means referred user deposited) ─
+    cur.execute(
+        "SELECT COUNT(*) AS c FROM referrals WHERE referrer_id=%s AND status='CREDITED'", (uid,)
+    )
+    referral_count = cur.fetchone()["c"]
+    if referral_count == 0:
+        cur.close(); conn.close()
+        return err("You must have at least one referred user who made a deposit")
+
     if u["pin_hash"] and u["pin_hash"] != _hash(pin):
         cur.close(); conn.close()
         return err("Invalid PIN", 403)
@@ -1127,15 +1137,16 @@ start_scheduler()
 
 if __name__ == "__main__":
     print("\n" + "="*60)
-    print("   Summit Wealth v5.5 — $8 PROFIT PER $100 BALANCE")
+    print("   Summit Wealth v5.6 — $8 PROFIT PER $100 BALANCE")
     print("="*60)
     print(f"   URL    : http://127.0.0.1:8080")
     print(f"   Client : john@test.com  / demo1234")
     print(f"   Admin  : admin@test.com / admin1234")
     print(f"   Rate   : ${DAILY_PROFIT_PER_100} per $100 balance/day at {TRADE_HOUR:02d}:00 UTC ({TRADE_HOUR+3:02d}:00 EAT)")
     print(f"   Symbol : {TRADE_SYMBOL}")
-    print(f"   Min Dep: $100  |  Min Withdrawal: $1,000")
+    print(f"   Min Dep: $100  |  Min Withdrawal: $1,000  |  Ref Withdrawal: $16")
     print(f"   Binance: {'CONNECTED ✓' if bnb else 'fallback prices'}")
     print(f"   TRC20  : {'SET ✓' if MANUAL_WALLETS['TRC20'] else 'NOT SET ✗'}")
     print("="*60 + "\n")
     app.run(debug=False, port=8080, host="0.0.0.0")
+Done

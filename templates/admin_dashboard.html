@@ -407,7 +407,16 @@ const post = (u,b) => api(u,{method:'POST',headers:{'Content-Type':'application/
 const fmt  = n => parseFloat(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 const fmtD = n => '$' + fmt(n);
 
-// Only updates DOM when content actually changed — prevents flash on refresh
+// ── SAFE DATA STORE ───────────────────────────────────────────────────────────
+// All transaction/client objects are stored here and looked up by id.
+// Buttons pass ONLY the tx id — never raw data in onclick strings.
+// This eliminates all escaping bugs from quotes/slashes in addresses.
+const _txMap     = {};
+const _clientMap = {};
+
+function storeTx(tx)     { _txMap[tx.id]     = tx; }
+function storeClient(c)  { _clientMap[c.id]  = c; }
+
 function setHTML(el, html) {
   if (typeof el === 'string') el = document.getElementById(el);
   if (el && el.innerHTML !== html) el.innerHTML = html;
@@ -565,17 +574,18 @@ function renderPending(txData) {
   }
   let html = '<table class="tbl"><thead><tr><th>Date</th><th>Client</th><th>Amount</th><th>Network</th><th>Address Sent From</th><th>Reference</th><th>Actions</th></tr></thead><tbody>';
   pending.forEach(t => {
+    storeTx(t);
     const addr = (t.deposit_address || '—');
     const addrShort = addr.length > 20 ? addr.substring(0, 20) + '...' : addr;
     html += `<tr>
       <td style="color:#aaa;">${(t.created_at || '').substring(0, 16).replace('T', ' ')}</td>
-      <td><div style="font-weight:bold;">${t.user_name || '—'}</div><div style="font-size:10px;color:#555;">${t.user_email || ''}</div></td>
+      <td><div style="font-weight:bold;">${escHtml(t.user_name || '—')}</div><div style="font-size:10px;color:#555;">${escHtml(t.user_email || '')}</div></td>
       <td style="color:#00e090;font-weight:bold;">$${fmt(t.amount_usd)}</td>
-      <td><span class="badge badge-pending">${t.method || '—'}</span></td>
-      <td style="font-family:monospace;font-size:10px;color:#aaa;" title="${addr}">${addrShort}</td>
-      <td style="font-size:11px;color:#555;">${t.reference || '—'}</td>
+      <td><span class="badge badge-pending">${escHtml(t.method || '—')}</span></td>
+      <td style="font-family:monospace;font-size:10px;color:#aaa;" title="${escAttr(addr)}">${escHtml(addrShort)}</td>
+      <td style="font-size:11px;color:#555;">${escHtml(t.reference || '—')}</td>
       <td><div style="display:flex;gap:6px;">
-        <button class="btn-sm btn-green" onclick="openApproveModal('${t.id}','${esc(t.user_name)}','${fmt(t.amount_usd)}','${t.method || ''}','${esc(addr)}','${t.reference || ''}')">&#9989; Approve</button>
+        <button class="btn-sm btn-green" onclick="openApproveModal('${t.id}')">&#9989; Approve</button>
         <button class="btn-sm btn-danger" onclick="openRejectModal('${t.id}')">&#10060; Reject</button>
       </div></td>
     </tr>`;
@@ -586,7 +596,9 @@ function renderPending(txData) {
 
 // ── PENDING WITHDRAWALS ───────────────────────────────────────────────────────
 function renderPendingWithdrawals(txData) {
-  const pending = txData.filter(t => (t.type === 'WITHDRAWAL' || t.type === 'REFERRAL_WITHDRAWAL') && t.status === 'PENDING');
+  const pending = txData.filter(t =>
+    (t.type === 'WITHDRAWAL' || t.type === 'REFERRAL_WITHDRAWAL') && t.status === 'PENDING'
+  );
   if (!pending.length) {
     setHTML('pendingWdrList', '<div class="empty">&#9989; No pending withdrawals. All clear!</div>');
     return;
@@ -596,6 +608,7 @@ function renderPendingWithdrawals(txData) {
     <th>Network</th><th>Send USDT To</th><th>Reference</th><th>Actions</th>
   </tr></thead><tbody>`;
   pending.forEach(t => {
+    storeTx(t);
     const addr      = (t.deposit_address || '—');
     const addrShort = addr.length > 24 ? addr.substring(0, 24) + '...' : addr;
     const isRef     = t.type === 'REFERRAL_WITHDRAWAL';
@@ -604,19 +617,19 @@ function renderPendingWithdrawals(txData) {
       : `<span style="background:rgba(255,69,96,0.15);border:1px solid #ff4560;color:#ff4560;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:bold;">&#128181; ACCOUNT</span>`;
     const amtColor  = isRef ? '#a78bfa' : '#ff4560';
     const addrCell  = addr !== '—'
-      ? `<span style="font-family:monospace;font-size:10px;color:#d4af37;" title="${addr}">${addrShort}</span>
-         <button onclick="copyAddr('${addr}')" style="margin-left:6px;padding:2px 7px;background:#333;border:1px solid #555;color:#aaa;border-radius:3px;cursor:pointer;font-size:10px;">&#128203;</button>`
+      ? `<span style="font-family:monospace;font-size:10px;color:#d4af37;" title="${escAttr(addr)}">${escHtml(addrShort)}</span>
+         <button onclick="copyAddr('${escAttr(addr)}')" style="margin-left:6px;padding:2px 7px;background:#333;border:1px solid #555;color:#aaa;border-radius:3px;cursor:pointer;font-size:10px;">&#128203;</button>`
       : '<span style="color:#ff4560;font-size:11px;">No address!</span>';
     html += `<tr>
       <td style="color:#aaa;font-size:11px;">${(t.created_at || '').substring(0, 16).replace('T', ' ')}</td>
-      <td><div style="font-weight:bold;">${t.user_name || '—'}</div><div style="font-size:10px;color:#555;">${t.user_email || ''}</div></td>
+      <td><div style="font-weight:bold;">${escHtml(t.user_name || '—')}</div><div style="font-size:10px;color:#555;">${escHtml(t.user_email || '')}</div></td>
       <td>${typeCell}</td>
       <td style="color:${amtColor};font-weight:bold;font-size:15px;">$${fmt(t.amount_usd)}</td>
-      <td><span style="background:rgba(212,175,55,0.1);border:1px solid #d4af37;color:#d4af37;border-radius:4px;padding:2px 8px;font-size:11px;">${t.method || '—'}</span></td>
+      <td><span style="background:rgba(212,175,55,0.1);border:1px solid #d4af37;color:#d4af37;border-radius:4px;padding:2px 8px;font-size:11px;">${escHtml(t.method || '—')}</span></td>
       <td>${addrCell}</td>
-      <td style="font-size:11px;color:#555;">${t.reference || '—'}</td>
+      <td style="font-size:11px;color:#555;">${escHtml(t.reference || '—')}</td>
       <td><div style="display:flex;gap:6px;">
-        <button class="btn-sm btn-green" onclick="openApproveWdrModal('${t.id}','${esc(t.user_name)}','${fmt(t.amount_usd)}','${t.method || ''}','${esc(addr)}','${t.reference || ''}','${isRef?'REFERRAL':'ACCOUNT'}')">&#9989; Approve</button>
+        <button class="btn-sm btn-green" onclick="openApproveWdrModal('${t.id}')">&#9989; Approve</button>
         <button class="btn-sm btn-danger" onclick="openRejectWdrModal('${t.id}')">&#10060; Reject</button>
       </div></td>
     </tr>`;
@@ -650,6 +663,7 @@ function renderClients(clients) {
       sumProfits = 0, sumRefEarned = 0, sumGenerated = 0;
 
   clients.forEach((c, i) => {
+    storeClient(c);
     const dep    = parseFloat(c.total_deposits    || 0);
     const wdr    = parseFloat(c.total_withdrawals || 0);
     const profit = parseFloat(c.total_profit      || 0);
@@ -665,9 +679,9 @@ function renderClients(clients) {
 
     html += `<tr>
       <td style="color:#555;">${i + 1}</td>
-      <td style="font-weight:bold;">${c.name || '—'}</td>
-      <td style="color:#aaa;font-size:11px;">${c.email || '—'}</td>
-      <td style="color:#aaa;font-size:11px;">${c.phone || '—'}</td>
+      <td style="font-weight:bold;">${escHtml(c.name || '—')}</td>
+      <td style="color:#aaa;font-size:11px;">${escHtml(c.email || '—')}</td>
+      <td style="color:#aaa;font-size:11px;">${escHtml(c.phone || '—')}</td>
       <td style="color:#00e090;font-weight:bold;">${fmtD(bal)}</td>
       <td style="color:#d4af37;font-weight:bold;">${fmtD(eq)}</td>
       <td style="color:#00e090;">${fmtD(dep)}</td>
@@ -678,12 +692,12 @@ function renderClients(clients) {
       <td style="text-align:center;">${c.ref_count || 0}</td>
       <td style="text-align:center;color:#aaa;">${c.days_active || 0}</td>
       <td style="color:#ffc800;font-weight:bold;">${fmtD(gen)}</td>
-      <td style="font-family:monospace;font-size:11px;color:#aaa;">${c.referral_code || '—'}</td>
+      <td style="font-family:monospace;font-size:11px;color:#aaa;">${escHtml(c.referral_code || '—')}</td>
       <td style="color:#555;font-size:11px;">${(c.created_at || '').substring(0, 10)}</td>
       <td>
         <button class="btn-sm"
           style="background:rgba(212,175,55,0.1);border:1px solid #d4af37;color:#d4af37;"
-          onclick="openEditClientModal('${c.id}','${esc(c.name||'')}','${esc(c.email||'')}','${esc(c.phone||'')}')">
+          onclick="openEditClientModal('${c.id}')">
           &#9998; Edit
         </button>
       </td>
@@ -715,20 +729,27 @@ function renderTx(txs) {
   if (!txs || !txs.length) { setHTML('txList', '<div class="empty">No transactions found.</div>'); return; }
   let html = '<table class="tbl"><thead><tr><th>Date</th><th>Client</th><th>Type</th><th>Amount</th><th>Network</th><th>Status</th><th>Reference</th><th>Actions</th></tr></thead><tbody>';
   txs.forEach(t => {
-    const tc = t.type === 'DEPOSIT' ? 'type-deposit' : t.type === 'WITHDRAWAL' ? 'type-withdrawal' : t.type === 'REFERRAL_WITHDRAWAL' ? 'type-referral' : 'type-adjustment';
-    const bc = t.status === 'COMPLETED' ? 'badge-completed' : t.status === 'PENDING' ? 'badge-pending' : 'badge-rejected';
-    const showApprove = (t.type === 'WITHDRAWAL' || t.type === 'REFERRAL_WITHDRAWAL') && t.status === 'PENDING';
-    const isRef = t.type === 'REFERRAL_WITHDRAWAL';
+    storeTx(t);
+    const tc = t.type === 'DEPOSIT' ? 'type-deposit'
+             : t.type === 'WITHDRAWAL' ? 'type-withdrawal'
+             : t.type === 'REFERRAL_WITHDRAWAL' ? 'type-referral'
+             : 'type-adjustment';
+    const bc = t.status === 'COMPLETED' ? 'badge-completed'
+             : t.status === 'PENDING'   ? 'badge-pending'
+             : 'badge-rejected';
+    // Only show approve button for PENDING withdrawals (never deposits)
+    const isWdr = (t.type === 'WITHDRAWAL' || t.type === 'REFERRAL_WITHDRAWAL');
+    const showApprove = isWdr && t.status === 'PENDING';
     html += `<tr>
       <td style="color:#aaa;font-size:11px;">${(t.created_at || '').substring(0, 16).replace('T', ' ')}</td>
-      <td style="font-weight:bold;">${t.user_name || '—'}</td>
+      <td style="font-weight:bold;">${escHtml(t.user_name || '—')}</td>
       <td class="${tc}">${(t.type || '').replace(/_/g, ' ')}</td>
       <td style="font-weight:bold;">$${fmt(t.amount_usd)}</td>
-      <td style="color:#aaa;font-size:11px;">${t.method || '—'}</td>
+      <td style="color:#aaa;font-size:11px;">${escHtml(t.method || '—')}</td>
       <td><span class="badge ${bc}">${t.status}</span></td>
-      <td style="color:#555;font-size:11px;">${t.reference || '—'}</td>
+      <td style="color:#555;font-size:11px;">${escHtml(t.reference || '—')}</td>
       <td>${showApprove
-        ? `<button class="btn-sm btn-green" onclick="openApproveWdrModal('${t.id}','${esc(t.user_name)}','${fmt(t.amount_usd)}','${t.method || ''}','${esc(t.deposit_address || '')}','${t.reference || ''}','${isRef?'REFERRAL':'ACCOUNT'}')">&#9989; Approve</button>`
+        ? `<button class="btn-sm btn-green" onclick="openApproveWdrModal('${t.id}')">&#9989; Approve</button>`
         : '<span style="color:#333;">—</span>'}</td>
     </tr>`;
   });
@@ -757,8 +778,8 @@ async function loadReferrals() {
   d.data.forEach(r => {
     html += `<tr>
       <td style="color:#aaa;font-size:11px;">${(r.created_at || '').substring(0, 10)}</td>
-      <td><div style="font-weight:bold;">${r.referrer_name || '—'}</div><div style="font-size:10px;color:#555;">${r.referrer_email || ''}</div></td>
-      <td><div style="font-weight:bold;">${r.referred_name || '—'}</div><div style="font-size:10px;color:#555;">${r.referred_email || ''}</div></td>
+      <td><div style="font-weight:bold;">${escHtml(r.referrer_name || '—')}</div><div style="font-size:10px;color:#555;">${escHtml(r.referrer_email || '')}</div></td>
+      <td><div style="font-weight:bold;">${escHtml(r.referred_name || '—')}</div><div style="font-size:10px;color:#555;">${escHtml(r.referred_email || '')}</div></td>
       <td style="color:#00e090;font-weight:bold;">$${fmt(r.commission_usd)}</td>
       <td><span class="badge badge-credited">${r.status}</span></td>
     </tr>`;
@@ -780,14 +801,14 @@ async function loadTrades() {
     const dirColor = t.direction === 'BUY' ? '#00e090' : '#ff4560';
     html += `<tr>
       <td style="color:#aaa;font-size:11px;">${(t.opened_at || '').substring(0, 16).replace('T', ' ')}</td>
-      <td style="font-weight:bold;">${t.user_name || '—'}</td>
-      <td style="color:#d4af37;font-weight:bold;">${t.symbol || '—'}</td>
-      <td style="color:${dirColor};font-weight:bold;">${t.direction || '—'}</td>
+      <td style="font-weight:bold;">${escHtml(t.user_name || '—')}</td>
+      <td style="color:#d4af37;font-weight:bold;">${escHtml(t.symbol || '—')}</td>
+      <td style="color:${dirColor};font-weight:bold;">${escHtml(t.direction || '—')}</td>
       <td>$${fmt(t.entry_price)}</td>
       <td>${t.close_price ? '$' + fmt(t.close_price) : '<span style="color:#555">Open</span>'}</td>
       <td style="color:${pnlColor};font-weight:bold;">${t.pnl != null ? (t.pnl >= 0 ? '+' : '') + fmt(t.pnl) : '—'}</td>
       <td><span class="badge ${t.status === 'OPEN' ? 'badge-open' : 'badge-closed'}">${t.status}</span></td>
-      <td style="color:#555;font-size:11px;">${t.close_reason || '—'}</td>
+      <td style="color:#555;font-size:11px;">${escHtml(t.close_reason || '—')}</td>
     </tr>`;
   });
   html += '</tbody></table>';
@@ -800,7 +821,11 @@ function populateAdjustClients() {
   const cur = sel.value;
   sel.innerHTML = '<option value="">— Select client —</option>';
   allClients.forEach(c => {
-    sel.innerHTML += `<option value="${c.id}" ${c.id === cur ? 'selected' : ''}>${c.name} (${c.email}) — $${fmt(c.balance)}</option>`;
+    const opt = document.createElement('option');
+    opt.value = c.id;
+    opt.textContent = `${c.name} (${c.email}) — $${fmt(c.balance)}`;
+    if (c.id === cur) opt.selected = true;
+    sel.appendChild(opt);
   });
 }
 
@@ -820,11 +845,14 @@ async function submitAdjust() {
 }
 
 // ── EDIT CLIENT ───────────────────────────────────────────────────────────────
-function openEditClientModal(uid, name, email, phone) {
+// Receives only the client id — data is pulled from _clientMap
+function openEditClientModal(uid) {
+  const c = _clientMap[uid];
+  if (!c) return;
   document.getElementById('editClientId').value    = uid;
-  document.getElementById('editClientName').value  = name;
-  document.getElementById('editClientEmail').value = email;
-  document.getElementById('editClientPhone').value = phone;
+  document.getElementById('editClientName').value  = c.name  || '';
+  document.getElementById('editClientEmail').value = c.email || '';
+  document.getElementById('editClientPhone').value = c.phone || '';
   document.getElementById('editClientErr').classList.remove('show');
   document.getElementById('editClientOk').classList.remove('show');
   document.getElementById('editClientModal').classList.add('show');
@@ -857,41 +885,71 @@ async function saveClientEdit() {
 }
 
 // ── MODALS ────────────────────────────────────────────────────────────────────
-function esc(s) { return (s || '').replace(/'/g, "\\'"); }
 
-function openApproveModal(txId, name, amount, network, address, ref) {
-  document.getElementById('modalTxId').value = txId;
-  document.getElementById('modalClientName').textContent = name;
-  document.getElementById('modalAmount').textContent = '$' + amount;
-  document.getElementById('modalNetwork').textContent = network;
-  document.getElementById('modalAddress').textContent = address;
-  document.getElementById('modalRef').textContent = ref;
+// Escape helpers — never put raw data in onclick strings
+function escHtml(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function escAttr(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// Deposit approve: receives only tx id, pulls data from _txMap
+function openApproveModal(txId) {
+  const t = _txMap[txId];
+  if (!t) return;
+  document.getElementById('modalTxId').value             = txId;
+  document.getElementById('modalClientName').textContent = t.user_name  || '—';
+  document.getElementById('modalAmount').textContent     = '$' + fmt(t.amount_usd);
+  document.getElementById('modalNetwork').textContent    = t.method     || '—';
+  document.getElementById('modalAddress').textContent    = t.deposit_address || '—';
+  document.getElementById('modalRef').textContent        = t.reference  || '—';
   document.getElementById('approveModal').classList.add('show');
 }
 
 function openRejectModal(txId) {
-  document.getElementById('rejectTxId').value = txId;
+  const t = _txMap[txId];
+  if (!t) return;
+  document.getElementById('rejectTxId').value   = txId;
   document.getElementById('rejectReason').value = '';
   document.getElementById('rejectModal').classList.add('show');
 }
 
-function openApproveWdrModal(txId, name, amount, network, address, ref, type) {
-  document.getElementById('wdrModalTxId').value = txId;
-  document.getElementById('wdrModalClientName').textContent = name;
-  document.getElementById('wdrModalAmount').textContent = '$' + amount;
-  document.getElementById('wdrModalNetwork').textContent = network;
-  document.getElementById('wdrModalAddress').textContent = address;
-  document.getElementById('wdrModalRef').textContent = ref;
-  // show type badge inside modal
-  const isRef = type === 'REFERRAL';
-  document.getElementById('wdrModalTypeBadge').innerHTML = isRef
+// Withdrawal approve: receives only tx id, pulls data from _txMap
+function openApproveWdrModal(txId) {
+  const t = _txMap[txId];
+  if (!t) return;
+
+  // Safety check — refuse to open deposit in withdrawal modal
+  if (t.type === 'DEPOSIT') {
+    showError('This is a deposit, not a withdrawal.');
+    return;
+  }
+
+  const isRef = t.type === 'REFERRAL_WITHDRAWAL';
+  document.getElementById('wdrModalTxId').value             = txId;
+  document.getElementById('wdrModalClientName').textContent = t.user_name || '—';
+  document.getElementById('wdrModalAmount').textContent     = '$' + fmt(t.amount_usd);
+  document.getElementById('wdrModalNetwork').textContent    = t.method    || '—';
+  document.getElementById('wdrModalAddress').textContent    = t.deposit_address || '—';
+  document.getElementById('wdrModalRef').textContent        = t.reference || '—';
+  document.getElementById('wdrModalTypeBadge').innerHTML    = isRef
     ? `<span style="background:rgba(167,139,250,0.15);border:1px solid #a78bfa;color:#a78bfa;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:bold;">&#127381; REFERRAL — 16% commission</span>`
     : `<span style="background:rgba(255,69,96,0.15);border:1px solid #ff4560;color:#ff4560;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:bold;">&#128181; ACCOUNT withdrawal</span>`;
   document.getElementById('approveWdrModal').classList.add('show');
 }
 
 function openRejectWdrModal(txId) {
-  document.getElementById('rejectWdrTxId').value = txId;
+  const t = _txMap[txId];
+  if (!t) return;
+
+  // Safety check — refuse to open deposit in withdrawal reject modal
+  if (t.type === 'DEPOSIT') {
+    showError('This is a deposit, not a withdrawal.');
+    return;
+  }
+
+  document.getElementById('rejectWdrTxId').value   = txId;
   document.getElementById('rejectWdrReason').value = '';
   document.getElementById('rejectWdrModal').classList.add('show');
 }
@@ -902,8 +960,16 @@ document.querySelectorAll('.modal-overlay').forEach(o => {
   o.addEventListener('click', e => { if (e.target === o) o.classList.remove('show'); });
 });
 
+// confirmApprove — DEPOSIT only path
 async function confirmApprove() {
   const txId = document.getElementById('modalTxId').value;
+  const t    = _txMap[txId];
+  // Extra guard: never approve a withdrawal through the deposit endpoint
+  if (!t || t.type !== 'DEPOSIT') {
+    closeModal('approveModal');
+    showError('Type mismatch — please refresh and try again.');
+    return;
+  }
   const d = await post('/api/admin/deposit/approve', { tx_id: txId });
   closeModal('approveModal');
   if (!d.success) { showError(d.error); return; }
@@ -921,12 +987,20 @@ async function confirmReject() {
   await refreshData();
 }
 
+// confirmWdrApprove — WITHDRAWAL / REFERRAL_WITHDRAWAL only path
 async function confirmWdrApprove() {
   const txId = document.getElementById('wdrModalTxId').value;
+  const t    = _txMap[txId];
+  // Extra guard: never approve a deposit through the withdrawal endpoint
+  if (!t || t.type === 'DEPOSIT') {
+    closeModal('approveWdrModal');
+    showError('Type mismatch — please refresh and try again.');
+    return;
+  }
   const d = await post('/api/admin/withdrawal/approve', { tx_id: txId });
   closeModal('approveWdrModal');
   if (!d.success) { showError(d.error); return; }
-  showSuccess('Withdrawal approved.');
+  showSuccess('Withdrawal approved and marked complete.');
   await refreshData();
 }
 
@@ -947,8 +1021,8 @@ async function refreshData() {
     api('/api/admin/transactions'),
     api('/api/admin/clients'),
   ]);
-  if (txRes.success)     allTx      = txRes.data;
-  if (clientRes.success) allClients = clientRes.data;
+  if (txRes.success)     { allTx = txRes.data; allTx.forEach(storeTx); }
+  if (clientRes.success) { allClients = clientRes.data; allClients.forEach(storeClient); }
 
   if (activeTab === 'pending')      renderPending(allTx);
   if (activeTab === 'pendingWdr')   renderPendingWithdrawals(allTx);
@@ -963,8 +1037,8 @@ async function init() {
     api('/api/admin/transactions'),
     api('/api/admin/clients'),
   ]);
-  if (txRes.success)     allTx      = txRes.data;
-  if (clientRes.success) allClients = clientRes.data;
+  if (txRes.success)     { allTx = txRes.data; allTx.forEach(storeTx); }
+  if (clientRes.success) { allClients = clientRes.data; allClients.forEach(storeClient); }
 
   renderPending(allTx);
   buildCharts(allTx, allClients);

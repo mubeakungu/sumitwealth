@@ -68,18 +68,6 @@
     .copy-btn { padding:7px 14px; background:#333; color:#d4af37; border:1px solid #d4af37; border-radius:5px; cursor:pointer; font-size:11px; }
     .copy-btn:hover { background:#d4af37; color:#0a0e27; }
 
-    /* ── UPDATED v5.7+: M-Pesa PIN flow styles ── */
-    .mpesa-banner {
-      background:linear-gradient(135deg,rgba(0,158,73,0.15) 0%,rgba(0,100,47,0.08) 100%);
-      border:1px solid #00a550;
-      border-radius:8px; padding:16px 18px; margin:14px 0;
-    }
-    .mpesa-banner .mpesa-logo { font-size:22px; font-weight:900; color:#00a550; letter-spacing:1px; }
-    .mpesa-prompt-msg { font-size:13px; color:#aaa; line-height:1.8; margin:12px 0; }
-    .mpesa-prompt-msg strong { color:#00a550; }
-    .mpesa-steps  { font-size:12px; color:#aaa; line-height:2; margin-top:10px; }
-    .mpesa-steps strong { color:#00a550; }
-
     .tbl { width:100%; border-collapse:collapse; font-size:12px; }
     .tbl th { padding:10px 12px; text-align:left; color:#d4af37; background:rgba(212,175,55,0.08); border-bottom:1px solid #333; }
     .tbl td { padding:10px 12px; border-bottom:1px solid #1e2440; vertical-align:middle; }
@@ -226,28 +214,27 @@
     <div class="panel">
       <h2>Deposit Funds</h2>
 
-      <!-- Step 1: choose method & amount -->
+      <!-- Step 1: choose network & amount -->
       <div id="depStep1">
         <div class="form-group">
           <label>Amount (USD)</label>
           <input type="number" id="depAmount" placeholder="100" min="100">
         </div>
         <div class="form-group">
-          <label>Payment Method</label>
-          <select id="depNetwork" onchange="onNetworkChange()">
+          <label>Network</label>
+          <select id="depNetwork">
             <option value="TRC20">USDT — TRC20 (Tron) — Recommended</option>
             <option value="BEP20">USDT — BEP20 (BSC)</option>
             <option value="ERC20">USDT — ERC20 (Ethereum)</option>
-            <option value="MPESA">M-Pesa (Kenya)</option>
           </select>
         </div>
-        <div class="alert alert-info show" id="depHint">Send USDT to your address. Min: $100. Balance updates after admin confirms.</div>
+        <div class="alert alert-info show">Send USDT to your address. Min: $100. Balance updates after admin confirms.</div>
         <div class="alert alert-error" id="depErr"></div>
         <button class="btn-gold" onclick="getDepositAddr()">Continue</button>
       </div>
 
-      <!-- Step 2a: USDT address display -->
-      <div id="depStep2Usdt" style="display:none;">
+      <!-- Step 2: USDT address display -->
+      <div id="depStep2" style="display:none;">
         <div class="alert alert-success show">Send USDT to this address ONLY on the selected network!</div>
         <label>Your Deposit Address</label>
         <div class="address-box" id="depAddress">Loading...</div>
@@ -260,44 +247,6 @@
           4. Balance updates automatically after admin confirms
         </div>
         <button class="btn-gold" onclick="resetDep()" style="margin-top:15px; background:#333; color:#aaa;">&#8592; Back</button>
-      </div>
-
-      <!-- Step 2b: M-Pesa PIN flow (UPDATED v5.7+) -->
-      <div id="depStep2Mpesa" style="display:none;">
-        <div class="mpesa-banner">
-          <div class="mpesa-logo">M-PESA</div>
-          <div class="mpesa-prompt-msg">
-            A payment prompt will be sent to your registered M-Pesa phone number within seconds.
-            <strong>Check your phone now.</strong>
-          </div>
-          <div class="mpesa-steps">
-            <strong>What you'll see:</strong><br>
-            1. An STK/USSD prompt on your phone screen<br>
-            2. Enter your <strong>M-Pesa PIN</strong> to authorize payment<br>
-            3. Confirm the transaction amount
-          </div>
-        </div>
-
-        <div class="alert alert-warning show" style="display:block !important; margin-top:14px;">
-          &#9888; You are about to pay <strong>$<span id="depAmtMpesa">0.00</span> USD</strong> via M-Pesa.
-          The exact KES equivalent will be charged based on current rates.
-        </div>
-
-        <div class="alert alert-info show" style="display:block !important; margin-top:8px;">
-          &#9432; Your account will be credited immediately after admin verifies the M-Pesa transaction.
-          This typically takes 15-30 minutes.
-        </div>
-
-        <div class="alert alert-error" id="depErrMpesa"></div>
-        <div class="alert alert-success" id="depOkMpesa"></div>
-
-        <div class="form-group" style="margin-top:20px;">
-          <label>Enter Your M-Pesa PIN (4 digits)</label>
-          <input type="password" id="mpesaPin" maxlength="4" placeholder="••••" inputmode="numeric" style="font-size:24px; letter-spacing:8px; text-align:center;">
-        </div>
-
-        <button class="btn-gold" onclick="submitMpesaDeposit()">&#10003; Confirm & Pay via M-Pesa</button>
-        <button class="btn-gold" onclick="resetDep()" style="margin-top:8px; background:#333; color:#aaa;">&#8592; Back</button>
       </div>
 
     </div>
@@ -646,19 +595,6 @@
     loadReferralHistory();
   }
 
-  // ── UPDATED v5.7+: Network change handler ─────────────────────────────────
-  function onNetworkChange(){
-    const net = document.getElementById('depNetwork').value;
-    const hint = document.getElementById('depHint');
-    if(net === 'MPESA'){
-      hint.textContent = 'You will receive an M-Pesa prompt on your phone. Enter your PIN to complete the payment. Min: $100 equivalent.';
-      hint.className = 'alert alert-warning show';
-    } else {
-      hint.textContent = 'Send USDT to your address. Min: $100. Balance updates after admin confirms.';
-      hint.className = 'alert alert-info show';
-    }
-  }
-
   // ── DEPOSIT ─────────────────────────────────────────────────────────────────
   async function getDepositAddr(){
     const amt = parseFloat(document.getElementById('depAmount').value||0);
@@ -668,59 +604,20 @@
     const d = await api('/api/client/deposit/address?network='+net);
     if(!d.success){ showErr('depErr', d.error); return; }
 
-    if(net === 'MPESA'){
-      // Show M-Pesa PIN prompt flow
-      document.getElementById('depAmtMpesa').textContent = amt.toFixed(2);
-      document.getElementById('depStep1').style.display        = 'none';
-      document.getElementById('depStep2Mpesa').style.display   = 'block';
-      document.getElementById('depStep2Usdt').style.display    = 'none';
-      document.getElementById('mpesaPin').focus();
-    } else {
-      // Show USDT flow
-      document.getElementById('depAddress').textContent  = d.data.address;
-      document.getElementById('netLabel').textContent    = net;
-      document.getElementById('depAmtLabel').textContent = amt.toFixed(2);
-      document.getElementById('depStep1').style.display     = 'none';
-      document.getElementById('depStep2Usdt').style.display = 'block';
-      document.getElementById('depStep2Mpesa').style.display = 'none';
-      // Record pending deposit immediately for USDT
-      await post('/api/client/deposit/pending',{amount:amt, network:net, address:d.data.address});
-    }
-  }
+    document.getElementById('depAddress').textContent  = d.data.address;
+    document.getElementById('netLabel').textContent    = net;
+    document.getElementById('depAmtLabel').textContent = amt.toFixed(2);
+    document.getElementById('depStep1').style.display  = 'none';
+    document.getElementById('depStep2').style.display  = 'block';
 
-  // ── UPDATED v5.7+: M-Pesa PIN submission (no KES amount, just PIN) ─────────
-  async function submitMpesaDeposit(){
-    const amt      = parseFloat(document.getElementById('depAmount').value||0);
-    const pin      = document.getElementById('mpesaPin').value.trim();
-
-    if(!pin || pin.length < 4)   { showErr('depErrMpesa','Enter your 4-digit M-Pesa PIN'); return; }
-    if(pin.length > 4)           { showErr('depErrMpesa','PIN must be 4 digits only'); return; }
-    if(!/^\d+$/.test(pin))       { showErr('depErrMpesa','PIN must contain numbers only'); return; }
-
-    const d = await post('/api/client/deposit/pending',{
-      amount:     amt,
-      network:    'MPESA',
-      address:    'mpesa-prompt',
-      mpesa_pin:  pin,
-    });
-
-    if(!d.success){ showErr('depErrMpesa', d.error); return; }
-
-    document.getElementById('depOkMpesa').textContent =
-      '✓ Payment submitted! Ref: ' + d.data.reference +
-      ' — You should see an M-Pesa prompt on your phone. ' +
-      'Your deposit will be credited after admin verifies the transaction.';
-    document.getElementById('depOkMpesa').classList.add('show');
-    document.getElementById('mpesaPin').value = '';
-    setTimeout(() => loadDash(), 2000);
+    // Record pending deposit
+    await post('/api/client/deposit/pending',{amount:amt, network:net, address:d.data.address});
   }
 
   function resetDep(){
-    document.getElementById('depStep1').style.display      = 'block';
-    document.getElementById('depStep2Usdt').style.display  = 'none';
-    document.getElementById('depStep2Mpesa').style.display = 'none';
-    document.getElementById('depErrMpesa').classList.remove('show');
-    document.getElementById('depOkMpesa').classList.remove('show');
+    document.getElementById('depStep1').style.display = 'block';
+    document.getElementById('depStep2').style.display = 'none';
+    document.getElementById('depErr').classList.remove('show');
   }
 
   // ── WITHDRAW ────────────────────────────────────────────────────────────────
@@ -763,19 +660,16 @@
       document.getElementById('historyList').innerHTML='<p style="color:#aaa;padding:20px 0;">No transactions yet.</p>';
       return;
     }
-    let html='<table class="tbl"><thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Method</th><th>Status</th><th>Reference</th><th>Note</th></tr></thead><tbody>';
+    let html='<table class="tbl"><thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Network</th><th>Status</th><th>Reference</th><th>Note</th></tr></thead><tbody>';
     d.data.forEach(t=>{
       const tc=t.type==='DEPOSIT'?'type-deposit':t.type.includes('REFERRAL')?'type-ref':'type-withdrawal';
       const bc=t.status==='COMPLETED'?'badge-completed':(t.status==='PENDING'?'badge-pending':'badge-rejected');
-      const methodLabel = t.method==='MPESA'
-        ? '<span style="color:#00a550;font-weight:bold;">M-Pesa</span>'
-        : (t.method||'—');
       const noteCell = t.note ? `<span style="color:#aaa;font-size:10px;">${t.note}</span>` : '—';
       html+=`<tr>
         <td style="color:#aaa;">${(t.created_at||'').substring(0,10)}</td>
         <td class="${tc}">${t.type.replace(/_/g,' ')}</td>
         <td style="font-weight:bold;">$${fmt(t.amount_usd)}</td>
-        <td>${methodLabel}</td>
+        <td style="color:#aaa;">${t.method||'—'}</td>
         <td><span class="badge ${bc}">${t.status}</span></td>
         <td style="color:#555;font-size:11px;">${t.reference||'—'}</td>
         <td style="max-width:160px;">${noteCell}</td>

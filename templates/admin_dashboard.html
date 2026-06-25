@@ -40,6 +40,7 @@
     .badge-open      { background:rgba(0,136,255,0.15);   color:#0088ff; }
     .badge-closed    { background:rgba(150,150,150,0.15); color:#aaa; }
     .badge-credited  { background:rgba(212,175,55,0.15);  color:#d4af37; }
+    .badge-mpesa     { background:rgba(0,165,80,0.2);     color:#00a550; border:1px solid #00a550; }
     .type-deposit    { color:#00e090; font-weight:bold; }
     .type-withdrawal { color:#ff4560; font-weight:bold; }
     .type-adjustment { color:#d4af37; font-weight:bold; }
@@ -49,7 +50,7 @@
     .filter-bar input { flex:1; min-width:200px; }
     .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:1000; justify-content:center; align-items:center; }
     .modal-overlay.show { display:flex; }
-    .modal { background:#1a1f3a; border:1px solid #d4af37; border-radius:10px; padding:28px; width:440px; max-width:95vw; }
+    .modal { background:#1a1f3a; border:1px solid #d4af37; border-radius:10px; padding:28px; width:480px; max-width:95vw; max-height:90vh; overflow-y:auto; }
     .modal h3 { color:#d4af37; margin-bottom:18px; font-size:15px; }
     .form-group { margin-bottom:14px; }
     .form-group label { display:block; font-size:11px; color:#aaa; margin-bottom:5px; }
@@ -75,6 +76,29 @@
     .wallet-link { display:inline-flex; align-items:center; gap:5px; padding:6px 14px; background:rgba(212,175,55,0.08); border:1px solid #d4af37; color:#d4af37; border-radius:5px; font-size:11px; text-decoration:none; transition:background 0.2s; }
     .wallet-link:hover { background:rgba(212,175,55,0.2); }
     .wallet-link.not-set { border-color:#333; color:#555; pointer-events:none; }
+
+    /* ── M-Pesa panel in approve modal ── */
+    .mpesa-verify-panel {
+      display:none;
+      background:linear-gradient(135deg,rgba(0,165,80,0.1) 0%,rgba(0,100,47,0.06) 100%);
+      border:1px solid #00a550;
+      border-radius:8px; padding:14px 16px; margin:14px 0;
+    }
+    .mpesa-verify-panel.show { display:block; }
+    .mpesa-verify-title { color:#00a550; font-size:12px; font-weight:bold; margin-bottom:10px; letter-spacing:0.5px; }
+    .mpesa-verify-row   { display:flex; justify-content:space-between; font-size:12px; margin-bottom:6px; }
+    .mpesa-verify-label { color:#666; }
+    .mpesa-verify-val   { color:#00e090; font-weight:bold; font-family:monospace; }
+
+    /* ── M-Pesa note pill in table ── */
+    .mpesa-note {
+      display:inline-block; background:rgba(0,165,80,0.12);
+      border:1px solid rgba(0,165,80,0.4); color:#00a550;
+      border-radius:4px; padding:2px 8px; font-size:10px;
+      font-family:monospace; white-space:normal; word-break:break-all;
+      max-width:180px; vertical-align:middle;
+    }
+
     @media(max-width:900px) { .stats{grid-template-columns:repeat(2,1fr);} .charts-row{grid-template-columns:1fr;} }
   </style>
 </head>
@@ -170,6 +194,11 @@
           <a id="walletTRC20" href="#" target="_blank" class="wallet-link not-set">&#128279; Check TRC20 Wallet</a>
           <a id="walletBEP20" href="#" target="_blank" class="wallet-link not-set">&#128279; Check BEP20 Wallet</a>
           <a id="walletERC20" href="#" target="_blank" class="wallet-link not-set">&#128279; Check ERC20 Wallet</a>
+          <!-- NEW: M-Pesa quick link -->
+          <a href="https://www.safaricom.co.ke/personal/m-pesa/m-pesa-app" target="_blank"
+             class="wallet-link" style="border-color:#00a550;color:#00a550;background:rgba(0,165,80,0.08);">
+            &#128247; Check M-Pesa
+          </a>
         </div>
       </div>
       <div id="pendingList" class="loading">Loading...</div>
@@ -292,13 +321,32 @@
   <div class="modal">
     <h3>&#9989; Approve Deposit</h3>
     <p style="color:#aaa;font-size:13px;margin-bottom:18px;">Confirm you have received the funds. This will credit the client's account.</p>
-    <div style="background:#0a0e27;border:1px solid #2a2f4a;border-radius:6px;padding:14px;margin-bottom:18px;font-size:13px;line-height:2.1;">
+
+    <div style="background:#0a0e27;border:1px solid #2a2f4a;border-radius:6px;padding:14px;margin-bottom:14px;font-size:13px;line-height:2.1;">
       <div><span style="color:#aaa;">Client:</span> <strong id="modalClientName"></strong></div>
       <div><span style="color:#aaa;">Amount:</span> <span id="modalAmount" style="color:#00e090;font-weight:bold;"></span></div>
-      <div><span style="color:#aaa;">Network:</span> <span id="modalNetwork" style="color:#d4af37;"></span></div>
+      <div><span style="color:#aaa;">Method:</span> <span id="modalNetwork"></span></div>
       <div><span style="color:#aaa;">Address:</span> <span id="modalAddress" style="font-family:monospace;font-size:11px;color:#aaa;"></span></div>
       <div><span style="color:#aaa;">Reference:</span> <span id="modalRef" style="font-size:11px;color:#aaa;"></span></div>
     </div>
+
+    <!-- NEW: M-Pesa verification panel — shown only for MPESA deposits -->
+    <div class="mpesa-verify-panel" id="mpesaVerifyPanel">
+      <div class="mpesa-verify-title">&#128247; M-PESA VERIFICATION DETAILS</div>
+      <div class="mpesa-verify-row">
+        <span class="mpesa-verify-label">KES Amount Sent:</span>
+        <span class="mpesa-verify-val" id="mpesaVerifyKes">—</span>
+      </div>
+      <div class="mpesa-verify-row">
+        <span class="mpesa-verify-label">Transaction Code:</span>
+        <span class="mpesa-verify-val" id="mpesaVerifyRef">—</span>
+      </div>
+      <div style="margin-top:10px;font-size:11px;color:#666;line-height:1.6;">
+        &#9888; Verify this transaction on your M-Pesa statement before approving.
+        Check that the KES amount and transaction code above match what you received.
+      </div>
+    </div>
+
     <input type="hidden" id="modalTxId">
     <div class="modal-btns">
       <button class="btn" style="background:#333;color:#aaa;" onclick="closeModal('approveModal')">Cancel</button>
@@ -408,14 +456,11 @@ const fmt  = n => parseFloat(n||0).toLocaleString('en-US',{minimumFractionDigits
 const fmtD = n => '$' + fmt(n);
 
 // ── SAFE DATA STORE ───────────────────────────────────────────────────────────
-// All transaction/client objects are stored here and looked up by id.
-// Buttons pass ONLY the tx id — never raw data in onclick strings.
-// This eliminates all escaping bugs from quotes/slashes in addresses.
 const _txMap     = {};
 const _clientMap = {};
 
-function storeTx(tx)     { _txMap[tx.id]     = tx; }
-function storeClient(c)  { _clientMap[c.id]  = c; }
+function storeTx(tx)    { _txMap[tx.id]    = tx; }
+function storeClient(c) { _clientMap[c.id] = c; }
 
 function setHTML(el, html) {
   if (typeof el === 'string') el = document.getElementById(el);
@@ -565,6 +610,19 @@ function buildCharts(transactions, clients) {
   });
 }
 
+// ── NEW: parse M-Pesa note field into { kes, ref } ───────────────────────────
+// note format: "KES sent: 13500 | M-Pesa ref: QJK3XAB12C"
+function parseMpesaNote(note) {
+  const out = { kes: null, ref: null };
+  if (!note) return out;
+  const parts = note.split('|').map(p => p.trim());
+  parts.forEach(p => {
+    if (p.toLowerCase().startsWith('kes sent:'))   out.kes = p.split(':')[1].trim();
+    if (p.toLowerCase().startsWith('m-pesa ref:')) out.ref = p.split(':')[1].trim();
+  });
+  return out;
+}
+
 // ── PENDING DEPOSITS ──────────────────────────────────────────────────────────
 function renderPending(txData) {
   const pending = txData.filter(t => t.type === 'DEPOSIT' && t.status === 'PENDING');
@@ -572,17 +630,44 @@ function renderPending(txData) {
     setHTML('pendingList', '<div class="empty">&#9989; No pending deposits. All clear!</div>');
     return;
   }
-  let html = '<table class="tbl"><thead><tr><th>Date</th><th>Client</th><th>Amount</th><th>Network</th><th>Address Sent From</th><th>Reference</th><th>Actions</th></tr></thead><tbody>';
+
+  let html = `<table class="tbl"><thead><tr>
+    <th>Date</th><th>Client</th><th>Amount</th><th>Method</th>
+    <th>Address / Number</th><th>M-Pesa Details</th><th>Reference</th><th>Actions</th>
+  </tr></thead><tbody>`;
+
   pending.forEach(t => {
     storeTx(t);
-    const addr = (t.deposit_address || '—');
+    const isMpesa   = t.method === 'MPESA';
+    const addr      = t.deposit_address || '—';
     const addrShort = addr.length > 20 ? addr.substring(0, 20) + '...' : addr;
+
+    // Method badge
+    const methodBadge = isMpesa
+      ? `<span class="badge badge-mpesa">M-Pesa</span>`
+      : `<span class="badge badge-pending">${escHtml(t.method || '—')}</span>`;
+
+    // M-Pesa details cell — KES amount + transaction code from note
+    let mpesaCell = '<span style="color:#333;">—</span>';
+    if (isMpesa && t.note) {
+      const mp = parseMpesaNote(t.note);
+      const kesLine = mp.kes ? `<div style="color:#00a550;font-size:10px;font-weight:bold;">KES ${escHtml(mp.kes)}</div>` : '';
+      const refLine = mp.ref ? `<div style="font-family:monospace;font-size:10px;color:#00e090;">${escHtml(mp.ref)}</div>` : '';
+      mpesaCell = (kesLine || refLine)
+        ? `<div class="mpesa-note">${kesLine}${refLine}</div>`
+        : `<span style="color:#ffc800;font-size:10px;">Submitted — no code</span>`;
+    }
+
     html += `<tr>
       <td style="color:#aaa;">${(t.created_at || '').substring(0, 16).replace('T', ' ')}</td>
-      <td><div style="font-weight:bold;">${escHtml(t.user_name || '—')}</div><div style="font-size:10px;color:#555;">${escHtml(t.user_email || '')}</div></td>
+      <td>
+        <div style="font-weight:bold;">${escHtml(t.user_name || '—')}</div>
+        <div style="font-size:10px;color:#555;">${escHtml(t.user_email || '')}</div>
+      </td>
       <td style="color:#00e090;font-weight:bold;">$${fmt(t.amount_usd)}</td>
-      <td><span class="badge badge-pending">${escHtml(t.method || '—')}</span></td>
+      <td>${methodBadge}</td>
       <td style="font-family:monospace;font-size:10px;color:#aaa;" title="${escAttr(addr)}">${escHtml(addrShort)}</td>
+      <td>${mpesaCell}</td>
       <td style="font-size:11px;color:#555;">${escHtml(t.reference || '—')}</td>
       <td><div style="display:flex;gap:6px;">
         <button class="btn-sm btn-green" onclick="openApproveModal('${t.id}')">&#9989; Approve</button>
@@ -590,6 +675,7 @@ function renderPending(txData) {
       </div></td>
     </tr>`;
   });
+
   html += '</tbody></table>';
   setHTML('pendingList', html);
 }
@@ -609,7 +695,7 @@ function renderPendingWithdrawals(txData) {
   </tr></thead><tbody>`;
   pending.forEach(t => {
     storeTx(t);
-    const addr      = (t.deposit_address || '—');
+    const addr      = t.deposit_address || '—';
     const addrShort = addr.length > 24 ? addr.substring(0, 24) + '...' : addr;
     const isRef     = t.type === 'REFERRAL_WITHDRAWAL';
     const typeCell  = isRef
@@ -727,7 +813,10 @@ function filterClients() {
 // ── TRANSACTIONS ──────────────────────────────────────────────────────────────
 function renderTx(txs) {
   if (!txs || !txs.length) { setHTML('txList', '<div class="empty">No transactions found.</div>'); return; }
-  let html = '<table class="tbl"><thead><tr><th>Date</th><th>Client</th><th>Type</th><th>Amount</th><th>Network</th><th>Status</th><th>Reference</th><th>Actions</th></tr></thead><tbody>';
+  let html = `<table class="tbl"><thead><tr>
+    <th>Date</th><th>Client</th><th>Type</th><th>Amount</th>
+    <th>Method</th><th>Status</th><th>Reference</th><th>Note</th><th>Actions</th>
+  </tr></thead><tbody>`;
   txs.forEach(t => {
     storeTx(t);
     const tc = t.type === 'DEPOSIT' ? 'type-deposit'
@@ -737,17 +826,35 @@ function renderTx(txs) {
     const bc = t.status === 'COMPLETED' ? 'badge-completed'
              : t.status === 'PENDING'   ? 'badge-pending'
              : 'badge-rejected';
-    // Only show approve button for PENDING withdrawals (never deposits)
-    const isWdr = (t.type === 'WITHDRAWAL' || t.type === 'REFERRAL_WITHDRAWAL');
+    const isWdr      = (t.type === 'WITHDRAWAL' || t.type === 'REFERRAL_WITHDRAWAL');
     const showApprove = isWdr && t.status === 'PENDING';
+    const isMpesa    = t.method === 'MPESA';
+
+    // Note cell — show M-Pesa details or plain note
+    let noteCell = '<span style="color:#333;">—</span>';
+    if (isMpesa && t.note) {
+      const mp = parseMpesaNote(t.note);
+      const parts = [];
+      if (mp.kes) parts.push(`KES ${escHtml(mp.kes)}`);
+      if (mp.ref) parts.push(escHtml(mp.ref));
+      if (parts.length) noteCell = `<span class="mpesa-note">${parts.join('<br>')}</span>`;
+    } else if (t.note) {
+      noteCell = `<span style="color:#aaa;font-size:11px;">${escHtml(t.note)}</span>`;
+    }
+
+    const methodLabel = isMpesa
+      ? `<span style="color:#00a550;font-weight:bold;">M-Pesa</span>`
+      : escHtml(t.method || '—');
+
     html += `<tr>
       <td style="color:#aaa;font-size:11px;">${(t.created_at || '').substring(0, 16).replace('T', ' ')}</td>
       <td style="font-weight:bold;">${escHtml(t.user_name || '—')}</td>
       <td class="${tc}">${(t.type || '').replace(/_/g, ' ')}</td>
       <td style="font-weight:bold;">$${fmt(t.amount_usd)}</td>
-      <td style="color:#aaa;font-size:11px;">${escHtml(t.method || '—')}</td>
+      <td>${methodLabel}</td>
       <td><span class="badge ${bc}">${t.status}</span></td>
       <td style="color:#555;font-size:11px;">${escHtml(t.reference || '—')}</td>
+      <td>${noteCell}</td>
       <td>${showApprove
         ? `<button class="btn-sm btn-green" onclick="openApproveWdrModal('${t.id}')">&#9989; Approve</button>`
         : '<span style="color:#333;">—</span>'}</td>
@@ -845,7 +952,6 @@ async function submitAdjust() {
 }
 
 // ── EDIT CLIENT ───────────────────────────────────────────────────────────────
-// Receives only the client id — data is pulled from _clientMap
 function openEditClientModal(uid) {
   const c = _clientMap[uid];
   if (!c) return;
@@ -885,8 +991,6 @@ async function saveClientEdit() {
 }
 
 // ── MODALS ────────────────────────────────────────────────────────────────────
-
-// Escape helpers — never put raw data in onclick strings
 function escHtml(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
@@ -894,16 +998,39 @@ function escAttr(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
-// Deposit approve: receives only tx id, pulls data from _txMap
+// Deposit approve modal — shows M-Pesa verification panel when relevant
 function openApproveModal(txId) {
   const t = _txMap[txId];
   if (!t) return;
+
   document.getElementById('modalTxId').value             = txId;
   document.getElementById('modalClientName').textContent = t.user_name  || '—';
   document.getElementById('modalAmount').textContent     = '$' + fmt(t.amount_usd);
-  document.getElementById('modalNetwork').textContent    = t.method     || '—';
-  document.getElementById('modalAddress').textContent    = t.deposit_address || '—';
   document.getElementById('modalRef').textContent        = t.reference  || '—';
+
+  const isMpesa = t.method === 'MPESA';
+
+  // Method / address display
+  if (isMpesa) {
+    document.getElementById('modalNetwork').innerHTML =
+      `<span class="badge badge-mpesa">M-Pesa</span>`;
+    document.getElementById('modalAddress').textContent = t.deposit_address || '—';
+  } else {
+    document.getElementById('modalNetwork').textContent = t.method || '—';
+    document.getElementById('modalAddress').textContent = t.deposit_address || '—';
+  }
+
+  // Show / hide M-Pesa verification panel
+  const panel = document.getElementById('mpesaVerifyPanel');
+  if (isMpesa && t.note) {
+    const mp = parseMpesaNote(t.note);
+    document.getElementById('mpesaVerifyKes').textContent = mp.kes ? 'KES ' + mp.kes : 'Not provided';
+    document.getElementById('mpesaVerifyRef').textContent = mp.ref || 'Not provided';
+    panel.classList.add('show');
+  } else {
+    panel.classList.remove('show');
+  }
+
   document.getElementById('approveModal').classList.add('show');
 }
 
@@ -915,16 +1042,10 @@ function openRejectModal(txId) {
   document.getElementById('rejectModal').classList.add('show');
 }
 
-// Withdrawal approve: receives only tx id, pulls data from _txMap
 function openApproveWdrModal(txId) {
   const t = _txMap[txId];
   if (!t) return;
-
-  // Safety check — refuse to open deposit in withdrawal modal
-  if (t.type === 'DEPOSIT') {
-    showError('This is a deposit, not a withdrawal.');
-    return;
-  }
+  if (t.type === 'DEPOSIT') { showError('This is a deposit, not a withdrawal.'); return; }
 
   const isRef = t.type === 'REFERRAL_WITHDRAWAL';
   document.getElementById('wdrModalTxId').value             = txId;
@@ -942,13 +1063,7 @@ function openApproveWdrModal(txId) {
 function openRejectWdrModal(txId) {
   const t = _txMap[txId];
   if (!t) return;
-
-  // Safety check — refuse to open deposit in withdrawal reject modal
-  if (t.type === 'DEPOSIT') {
-    showError('This is a deposit, not a withdrawal.');
-    return;
-  }
-
+  if (t.type === 'DEPOSIT') { showError('This is a deposit, not a withdrawal.'); return; }
   document.getElementById('rejectWdrTxId').value   = txId;
   document.getElementById('rejectWdrReason').value = '';
   document.getElementById('rejectWdrModal').classList.add('show');
@@ -960,11 +1075,9 @@ document.querySelectorAll('.modal-overlay').forEach(o => {
   o.addEventListener('click', e => { if (e.target === o) o.classList.remove('show'); });
 });
 
-// confirmApprove — DEPOSIT only path
 async function confirmApprove() {
   const txId = document.getElementById('modalTxId').value;
   const t    = _txMap[txId];
-  // Extra guard: never approve a withdrawal through the deposit endpoint
   if (!t || t.type !== 'DEPOSIT') {
     closeModal('approveModal');
     showError('Type mismatch — please refresh and try again.');
@@ -987,11 +1100,9 @@ async function confirmReject() {
   await refreshData();
 }
 
-// confirmWdrApprove — WITHDRAWAL / REFERRAL_WITHDRAWAL only path
 async function confirmWdrApprove() {
   const txId = document.getElementById('wdrModalTxId').value;
   const t    = _txMap[txId];
-  // Extra guard: never approve a deposit through the withdrawal endpoint
   if (!t || t.type === 'DEPOSIT') {
     closeModal('approveWdrModal');
     showError('Type mismatch — please refresh and try again.');

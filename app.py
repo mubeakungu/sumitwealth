@@ -1,5 +1,5 @@
 """
-Summit Wealth v5.5 - $8 PROFIT PER $100 BALANCE (8% daily)
+Summit Wealth v5.7 - $8 PROFIT PER $100 BALANCE (8% daily)
 - Scheduler starts at module level (works with gunicorn on Render)
 - One controlled trade per client per day
 - Trade profit scales: $8 per $100 of balance
@@ -14,6 +14,9 @@ Summit Wealth v5.5 - $8 PROFIT PER $100 BALANCE (8% daily)
             referral withdrawal rejection now restores ref_balance
             admin clients list now includes total_deposits/withdrawals
 - FIX v5.6: referral withdrawal now requires referred user to have made a deposit
+- NEW v5.7: M-Pesa added as deposit payment method (number: 0757979633)
+            M-Pesa deposits capture KES amount sent + M-Pesa transaction code
+            stored in transaction note for admin verification
 """
 
 import os, hashlib, secrets, datetime, uuid, logging, threading, random
@@ -74,15 +77,18 @@ TRADE_HOUR           = int(os.environ.get("TRADE_HOUR", "5"))
 TRADE_SYMBOL         = os.environ.get("TRADE_SYMBOL", "BTCUSDT")
 CHECK_INTERVAL       = 60
 
+# ── NEW v5.7: M-Pesa added ────────────────────────────────────────────────────
 NETWORKS = {
     "TRC20": {"network": "TRX"},
     "BEP20": {"network": "BSC"},
     "ERC20": {"network": "ETH"},
+    "MPESA": {"network": "MPESA"},
 }
 MANUAL_WALLETS = {
-    "TRC20": os.environ.get("WALLET_TRC20", ""),
-    "BEP20": os.environ.get("WALLET_BEP20", ""),
-    "ERC20": os.environ.get("WALLET_ERC20", ""),
+    "TRC20":  os.environ.get("WALLET_TRC20", ""),
+    "BEP20":  os.environ.get("WALLET_BEP20", ""),
+    "ERC20":  os.environ.get("WALLET_ERC20", ""),
+    "MPESA":  os.environ.get("MPESA_NUMBER", "0757979633"),
 }
 
 REFERRAL_COMMISSION_PCT = 0.16
@@ -530,7 +536,6 @@ def client_summary():
     )
     dep = cur.fetchone()
 
-    # ── FIX: count BOTH withdrawal types, COMPLETED status only ──────────────
     cur.execute(
         """
         SELECT COALESCE(SUM(amount_usd), 0) AS s
@@ -543,7 +548,6 @@ def client_summary():
     )
     wdr = cur.fetchone()
 
-    # ── Also expose pending withdrawals so dashboard can show in-flight funds ─
     cur.execute(
         """
         SELECT COALESCE(SUM(amount_usd), 0) AS s
@@ -590,8 +594,8 @@ def client_summary():
         "balance":             balance,
         "equity":              a["equity"]       if a else 0,
         "total_deposits":      dep["s"],
-        "total_withdrawals":   wdr["s"],         # completed withdrawals
-        "pending_withdrawals": wdr_pending["s"], # in-flight withdrawals
+        "total_withdrawals":   wdr["s"],
+        "pending_withdrawals": wdr_pending["s"],
         "ref_balance":         a["ref_balance"]  if a else 0,
         "ref_code":            u["referral_code"] or "",
         "ref_count":           ref_count["c"],
@@ -637,7 +641,6 @@ def client_referral_withdraw():
     cur.execute("SELECT * FROM accounts WHERE user_id=%s", (uid,))
     a = cur.fetchone()
 
-    # ── NEW: Check if user has any valid referrals (means referred user deposited) ─
     cur.execute(
         "SELECT COUNT(*) AS c FROM referrals WHERE referrer_id=%s AND status='CREDITED'", (uid,)
     )
@@ -725,19 +728,46 @@ def client_deposit_address():
     if net not in NETWORKS: return err("Invalid network")
     wallet = MANUAL_WALLETS.get(net,"")
     if not wallet: return err("Deposit address not configured. Contact support.")
+
+    # ── NEW v5.7: M-Pesa specific response ───────────────────────────────────
+    if net == "MPESA":
+        return ok({
+            "address":      wallet,
+            "network":      net,
+            "mode":         "manual",
+            "label":        "M-Pesa Number",
+            "instructions": (
+                f"Send to M-Pesa number {wallet}. "
+                "Use your full name as the reference. "
+                "Enter the exact KES amount you sent and your M-Pesa transaction code, "
+                "then submit — admin will confirm and credit your account in USD."
+            ),
+        })
+
     return ok({"address": wallet, "network": net, "mode": "manual"})
 
 @app.route("/api/client/deposit/pending", methods=["POST"])
 @login_required
 def client_deposit_pending():
-    d    = request.json or {}
-    uid  = session["user_id"]
-    amt  = float(d.get("amount", 0))
-    net  = d.get("network","TRC20").upper()
-    addr = d.get("address","").strip()
+    d         = request.json or {}
+    uid       = session["user_id"]
+    amt       = float(d.get("amount", 0))
+    net       = d.get("network","TRC20").upper()
+    addr      = d.get("address","").strip()
+    # ── NEW v5.7: M-Pesa extra fields ────────────────────────────────────────
+    kes_amt   = d.get("kes_amount","").strip()
+    mpesa_ref = d.get("mpesa_ref","").strip()
 
     if amt < 100: return err("Minimum deposit is $100")
     if not addr:  return err("Deposit address is required")
+
+    # Build note for admin — M-Pesa deposits include KES amount + transaction code
+    note = None
+    if net == "MPESA":
+        parts = []
+        if kes_amt:   parts.append(f"KES sent: {kes_amt}")
+        if mpesa_ref: parts.append(f"M-Pesa ref: {mpesa_ref}")
+        note = " | ".join(parts) if parts else "M-Pesa deposit"
 
     conn = get_db()
     cur  = conn.cursor()
@@ -746,9 +776,10 @@ def client_deposit_pending():
     ref  = "SWC-" + secrets.token_hex(4).upper()
     cur.execute(
         "INSERT INTO transactions(id,user_id,account_id,type,method,amount_usd,"
-        "reference,status,deposit_address,created_at) "
-        "VALUES(%s,%s,%s,'DEPOSIT',%s,%s,%s,'PENDING',%s,%s)",
-        (_uid(), uid, acct["id"] if acct else None, net, amt, ref, addr, _now())
+        "reference,status,note,deposit_address,created_at) "
+        "VALUES(%s,%s,%s,'DEPOSIT',%s,%s,%s,'PENDING',%s,%s,%s)",
+        (_uid(), uid, acct["id"] if acct else None, net, amt, ref,
+         note, addr, _now())
     )
     conn.commit()
     cur.close(); conn.close()
@@ -808,7 +839,6 @@ def admin_stats():
     active = cur.fetchone()["c"]
     cur.execute("SELECT COALESCE(SUM(amount_usd),0) AS s FROM transactions WHERE type='DEPOSIT' AND status='COMPLETED'")
     deposits = cur.fetchone()["s"]
-    # FIX: count both withdrawal types
     cur.execute("SELECT COALESCE(SUM(amount_usd),0) AS s FROM transactions WHERE type IN ('WITHDRAWAL','REFERRAL_WITHDRAWAL') AND status='COMPLETED'")
     withdrawals = cur.fetchone()["s"]
     cur.execute("SELECT COUNT(*) AS c FROM transactions WHERE type='DEPOSIT' AND status='PENDING'")
@@ -924,8 +954,6 @@ def admin_approve_withdrawal():
         cur.close(); conn.close()
         return err("Pending withdrawal not found")
 
-    # ── FIX: deduct balance for regular WITHDRAWAL only ───────────────────────
-    # REFERRAL_WITHDRAWAL already zeroed ref_balance when client requested it
     if tx["type"] == "WITHDRAWAL":
         cur.execute(
             "UPDATE accounts SET balance=balance-%s, equity=equity-%s WHERE user_id=%s",
@@ -956,7 +984,6 @@ def admin_reject_withdrawal():
         cur.close(); conn.close()
         return err("Pending withdrawal not found")
 
-    # ── FIX: restore ref_balance if referral withdrawal is rejected ───────────
     if tx["type"] == "REFERRAL_WITHDRAWAL":
         cur.execute(
             "UPDATE accounts SET ref_balance=ref_balance+%s WHERE user_id=%s",
@@ -976,7 +1003,6 @@ def admin_reject_withdrawal():
 def admin_clients():
     conn = get_db()
     cur  = conn.cursor()
-    # FIX: added total_deposits, total_withdrawals, total_ref_earned subqueries
     cur.execute(
         "SELECT u.id, u.name, u.email, u.phone, u.referral_code, u.created_at, "
         "a.balance, a.equity, a.ref_balance, "
@@ -1137,7 +1163,7 @@ start_scheduler()
 
 if __name__ == "__main__":
     print("\n" + "="*60)
-    print("   Summit Wealth v5.6 — $8 PROFIT PER $100 BALANCE")
+    print("   Summit Wealth v5.7 — $8 PROFIT PER $100 BALANCE")
     print("="*60)
     print(f"   URL    : http://127.0.0.1:8080")
     print(f"   Client : john@test.com  / demo1234")
@@ -1147,6 +1173,6 @@ if __name__ == "__main__":
     print(f"   Min Dep: $100  |  Min Withdrawal: $1,000  |  Ref Withdrawal: $16")
     print(f"   Binance: {'CONNECTED ✓' if bnb else 'fallback prices'}")
     print(f"   TRC20  : {'SET ✓' if MANUAL_WALLETS['TRC20'] else 'NOT SET ✗'}")
+    print(f"   M-Pesa : {MANUAL_WALLETS['MPESA']} ✓")
     print("="*60 + "\n")
     app.run(debug=False, port=8080, host="0.0.0.0")
-

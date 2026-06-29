@@ -114,10 +114,77 @@
     .up   { color:#00e090; }
     .down { color:#ff4560; }
 
+    /* ── DEPOSIT METHOD SELECTOR ── */
+    .dep-method-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 22px;
+    }
+    .dep-method-card {
+      border: 2px solid #2a2f4a;
+      border-radius: 8px;
+      padding: 16px 14px;
+      cursor: pointer;
+      text-align: center;
+      transition: all 0.2s;
+      background: #0a0e27;
+    }
+    .dep-method-card:hover { border-color: #d4af37; }
+    .dep-method-card.active { border-color: #d4af37; background: rgba(212,175,55,0.07); }
+    .dep-method-card .dep-icon { font-size: 28px; margin-bottom: 8px; }
+    .dep-method-card .dep-title { font-size: 13px; font-weight: bold; color: #fff; margin-bottom: 3px; }
+    .dep-method-card .dep-sub { font-size: 10px; color: #666; }
+    .dep-method-card.active .dep-title { color: #d4af37; }
+
+    /* ── MPESA STK FLOW ── */
+    .mpesa-waiting {
+      text-align: center;
+      padding: 30px 20px;
+    }
+    .mpesa-spinner {
+      width: 50px; height: 50px;
+      border: 4px solid #2a2f4a;
+      border-top-color: #00c853;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 20px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .mpesa-waiting h3 { color: #00c853; font-size: 16px; margin-bottom: 10px; }
+    .mpesa-waiting p  { color: #aaa; font-size: 13px; line-height: 1.7; }
+    .mpesa-phone-display {
+      background: #0a0e27; border: 1px solid #00c853;
+      border-radius: 6px; padding: 10px 16px;
+      color: #00c853; font-size: 18px; font-weight: bold;
+      font-family: monospace; margin: 14px 0;
+      letter-spacing: 2px;
+    }
+    .mpesa-logo {
+      font-size: 13px; color: #00c853; font-weight: bold;
+      background: rgba(0,200,83,0.1); border: 1px solid rgba(0,200,83,0.3);
+      border-radius: 20px; padding: 4px 14px; display: inline-block;
+      margin-bottom: 16px;
+    }
+    .btn-cancel { 
+      background: transparent; border: 1px solid #555; color: #aaa;
+      padding: 9px 20px; border-radius: 5px; cursor: pointer;
+      font-size: 12px; margin-top: 14px;
+    }
+    .btn-cancel:hover { border-color: #ff4560; color: #ff4560; }
+
+    .exchange-rate-box {
+      background: rgba(212,175,55,0.05); border: 1px solid rgba(212,175,55,0.2);
+      border-radius: 6px; padding: 10px 14px; margin-bottom: 14px;
+      font-size: 12px; color: #aaa; display: flex; justify-content: space-between;
+    }
+    .exchange-rate-box span { color: #d4af37; font-weight: bold; }
+
     @media(max-width:900px) {
       .stats { grid-template-columns:repeat(2,1fr); }
       .charts-grid-top, .charts-grid-bottom { grid-template-columns:1fr; }
       .ref-stats { grid-template-columns:1fr 1fr; }
+      .dep-method-grid { grid-template-columns: 1fr 1fr; }
     }
   </style>
 </head>
@@ -209,44 +276,143 @@
     <button class="tab" id="refTab" onclick="switchTab(event,'referral')">&#127381; Referral <span id="refBadge" style="display:none; background:#00e090; color:#0a0e27; border-radius:20px; padding:1px 7px; font-size:10px; margin-left:4px;"></span></button>
   </div>
 
-  <!-- DEPOSIT TAB -->
+  <!-- ══════════════════════════════════════════════════════════════════
+       DEPOSIT TAB — M-Pesa + USDT
+  ══════════════════════════════════════════════════════════════════ -->
   <div id="deposit" class="tab-content show">
     <div class="panel">
       <h2>Deposit Funds</h2>
 
-      <!-- Step 1: choose network & amount -->
-      <div id="depStep1">
-        <div class="form-group">
-          <label>Amount (USD)</label>
-          <input type="number" id="depAmount" placeholder="100" min="100">
+      <!-- METHOD SELECTOR -->
+      <div id="depMethodSelect">
+        <div style="font-size:12px; color:#aaa; margin-bottom:14px;">Choose your deposit method:</div>
+        <div class="dep-method-grid">
+          <div class="dep-method-card active" id="methodMpesa" onclick="selectDepMethod('mpesa')">
+            <div class="dep-icon">📱</div>
+            <div class="dep-title">M-Pesa</div>
+            <div class="dep-sub">STK Push to phone • KES</div>
+          </div>
+          <div class="dep-method-card" id="methodUsdt" onclick="selectDepMethod('usdt')">
+            <div class="dep-icon">🪙</div>
+            <div class="dep-title">USDT Crypto</div>
+            <div class="dep-sub">TRC20 / BEP20 / ERC20</div>
+          </div>
         </div>
-        <div class="form-group">
-          <label>Network</label>
-          <select id="depNetwork">
-            <option value="TRC20">USDT — TRC20 (Tron) — Recommended</option>
-            <option value="BEP20">USDT — BEP20 (BSC)</option>
-            <option value="ERC20">USDT — ERC20 (Ethereum)</option>
-          </select>
-        </div>
-        <div class="alert alert-info show">Send USDT to your address. Min: $100. Balance updates after admin confirms.</div>
-        <div class="alert alert-error" id="depErr"></div>
-        <button class="btn-gold" onclick="getDepositAddr()">Continue</button>
       </div>
 
-      <!-- Step 2: USDT address display -->
-      <div id="depStep2" style="display:none;">
-        <div class="alert alert-success show">Send USDT to this address ONLY on the selected network!</div>
-        <label>Your Deposit Address</label>
-        <div class="address-box" id="depAddress">Loading...</div>
-        <button class="copy-btn" onclick="copyText('depAddress')">&#128203; Copy Address</button>
-        <div class="steps-box" style="margin-top:16px;">
-          <strong style="color:#d4af37;">Steps:</strong><br>
-          1. Open Binance or your wallet<br>
-          2. Withdraw USDT &rarr; paste address &rarr; select <strong id="netLabel"></strong><br>
-          3. Send exactly <strong id="depAmtLabel"></strong> USDT<br>
-          4. Balance updates automatically after admin confirms
+      <!-- ── M-PESA FLOW ── -->
+      <div id="mpesaFlow">
+
+        <!-- Step 1: Enter details -->
+        <div id="mpesaStep1">
+          <div class="alert alert-info show">
+            &#128241; You'll receive an M-Pesa prompt on your phone to confirm payment. Min: KES 500.
+          </div>
+          <div class="alert alert-error" id="mpesaErr"></div>
+
+          <div class="form-group">
+            <label>Amount (KES)</label>
+            <input type="number" id="mpesaAmount" placeholder="e.g. 13000" min="500"
+              oninput="updateMpesaRate()">
+          </div>
+
+          <div class="exchange-rate-box" id="mpesaRateBox" style="display:none;">
+            <div>Approx. USD value</div>
+            <span id="mpesaUsdPreview">—</span>
+          </div>
+
+          <div class="form-group">
+            <label>M-Pesa Phone Number</label>
+            <input type="tel" id="mpesaPhone" placeholder="e.g. 0712345678 or 254712345678"
+              maxlength="13">
+          </div>
+
+          <div class="steps-box" style="margin-bottom:14px;">
+            <strong style="color:#d4af37;">How it works:</strong><br>
+            1. Enter amount &amp; your M-Pesa number<br>
+            2. Click <strong>Send STK Push</strong><br>
+            3. Check your phone — enter M-Pesa PIN<br>
+            4. Balance updates after payment confirmed
+          </div>
+
+          <button class="btn-gold" onclick="initiateMpesa()" id="mpesaBtn">
+            📱 Send M-Pesa Prompt
+          </button>
         </div>
-        <button class="btn-gold" onclick="resetDep()" style="margin-top:15px; background:#333; color:#aaa;">&#8592; Back</button>
+
+        <!-- Step 2: Waiting for PIN -->
+        <div id="mpesaStep2" style="display:none;">
+          <div class="mpesa-waiting">
+            <div class="mpesa-logo">🟢 M-PESA</div>
+            <div class="mpesa-spinner"></div>
+            <h3>Waiting for Payment...</h3>
+            <p>An STK Push has been sent to:</p>
+            <div class="mpesa-phone-display" id="mpesaPhoneDisplay">—</div>
+            <p>
+              Enter your <strong style="color:#fff;">M-Pesa PIN</strong> on your phone<br>
+              to confirm the payment of <strong style="color:#d4af37;" id="mpesaAmtDisplay">—</strong>
+            </p>
+            <p style="margin-top:14px; color:#555; font-size:11px;" id="mpesaCountdown">
+              Checking status...
+            </p>
+            <br>
+            <button class="btn-cancel" onclick="cancelMpesa()">✕ Cancel</button>
+          </div>
+        </div>
+
+        <!-- Step 3: Result -->
+        <div id="mpesaStep3" style="display:none;">
+          <div class="alert alert-success show" id="mpesaSuccessMsg"></div>
+          <div class="alert alert-error show" id="mpesaFailMsg" style="display:none!important;"></div>
+          <div class="steps-box">
+            Your account balance will reflect the deposit shortly.<br>
+            If you have any issues, contact support with your M-Pesa transaction code.
+          </div>
+          <button class="btn-gold" onclick="resetMpesa()" style="margin-top:15px;">
+            ← Make Another Deposit
+          </button>
+        </div>
+
+      </div>
+
+      <!-- ── USDT FLOW ── -->
+      <div id="usdtFlow" style="display:none;">
+
+        <!-- Step 1: choose network & amount -->
+        <div id="depStep1">
+          <div class="form-group">
+            <label>Amount (USD)</label>
+            <input type="number" id="depAmount" placeholder="100" min="100">
+          </div>
+          <div class="form-group">
+            <label>Network</label>
+            <select id="depNetwork">
+              <option value="TRC20">USDT — TRC20 (Tron) — Recommended</option>
+              <option value="BEP20">USDT — BEP20 (BSC)</option>
+              <option value="ERC20">USDT — ERC20 (Ethereum)</option>
+            </select>
+          </div>
+          <div class="alert alert-info show">Send USDT to your address. Min: $100. Balance updates after admin confirms.</div>
+          <div class="alert alert-error" id="depErr"></div>
+          <button class="btn-gold" onclick="getDepositAddr()">Continue</button>
+        </div>
+
+        <!-- Step 2: USDT address display -->
+        <div id="depStep2" style="display:none;">
+          <div class="alert alert-success show">Send USDT to this address ONLY on the selected network!</div>
+          <label>Your Deposit Address</label>
+          <div class="address-box" id="depAddress">Loading...</div>
+          <button class="copy-btn" onclick="copyText('depAddress')">&#128203; Copy Address</button>
+          <div class="steps-box" style="margin-top:16px;">
+            <strong style="color:#d4af37;">Steps:</strong><br>
+            1. Open Binance or your wallet<br>
+            2. Withdraw USDT &rarr; paste address &rarr; select <strong id="netLabel"></strong><br>
+            3. Send exactly <strong id="depAmtLabel"></strong> USDT<br>
+            4. Balance updates automatically after admin confirms
+          </div>
+          <button class="btn-gold" onclick="resetDep()" style="margin-top:15px; background:#333; color:#aaa;">&#8592; Back</button>
+        </div>
+
       </div>
 
     </div>
@@ -595,7 +761,149 @@
     loadReferralHistory();
   }
 
-  // ── DEPOSIT ─────────────────────────────────────────────────────────────────
+  // ── DEPOSIT METHOD SELECTOR ──────────────────────────────────────────────────
+  let activeDepMethod = 'mpesa';
+
+  function selectDepMethod(method) {
+    activeDepMethod = method;
+    document.getElementById('methodMpesa').classList.toggle('active', method === 'mpesa');
+    document.getElementById('methodUsdt').classList.toggle('active',  method === 'usdt');
+    document.getElementById('mpesaFlow').style.display = method === 'mpesa' ? 'block' : 'none';
+    document.getElementById('usdtFlow').style.display  = method === 'usdt'  ? 'block' : 'none';
+  }
+
+  // ── M-PESA STK PUSH ─────────────────────────────────────────────────────────
+  const KES_USD_RATE = 129.5; // update periodically or fetch from /api/forex
+  let mpesaCheckInterval = null;
+  let mpesaCheckoutId    = null;
+  let mpesaCountSecs     = 0;
+
+  function updateMpesaRate() {
+    const kes = parseFloat(document.getElementById('mpesaAmount').value || 0);
+    const box = document.getElementById('mpesaRateBox');
+    if (kes >= 500) {
+      const usd = (kes / KES_USD_RATE).toFixed(2);
+      document.getElementById('mpesaUsdPreview').textContent = '≈ $' + usd;
+      box.style.display = 'flex';
+    } else {
+      box.style.display = 'none';
+    }
+  }
+
+  function formatPhone(raw) {
+    // Normalize to 254XXXXXXXXX
+    raw = raw.replace(/\s+/g, '').replace(/^0/, '254').replace(/^\+/, '');
+    return raw;
+  }
+
+  async function initiateMpesa() {
+    const kesAmt = parseFloat(document.getElementById('mpesaAmount').value || 0);
+    const phone  = formatPhone(document.getElementById('mpesaPhone').value.trim());
+
+    if (kesAmt < 500) { showErr('mpesaErr', 'Minimum deposit is KES 500'); return; }
+    if (!phone || phone.length < 12) { showErr('mpesaErr', 'Enter a valid M-Pesa phone number'); return; }
+
+    const btn = document.getElementById('mpesaBtn');
+    btn.disabled = true;
+    btn.textContent = 'Sending prompt...';
+
+    const res = await post('/api/client/mpesa/stk-push', {
+      phone_number: phone,
+      amount: kesAmt
+    });
+
+    btn.disabled = false;
+    btn.textContent = '📱 Send M-Pesa Prompt';
+
+    if (!res.success) {
+      showErr('mpesaErr', res.error || 'Failed to send STK Push. Try again.');
+      return;
+    }
+
+    // Store checkout ID for polling
+    mpesaCheckoutId = res.data.checkout_request_id;
+
+    // Show waiting screen
+    document.getElementById('mpesaStep1').style.display = 'none';
+    document.getElementById('mpesaStep2').style.display = 'block';
+    document.getElementById('mpesaPhoneDisplay').textContent = document.getElementById('mpesaPhone').value;
+    document.getElementById('mpesaAmtDisplay').textContent   = 'KES ' + kesAmt.toLocaleString();
+
+    // Start polling every 5 seconds, timeout after 90 seconds
+    mpesaCountSecs = 90;
+    mpesaCheckInterval = setInterval(pollMpesaStatus, 5000);
+    updateMpesaCountdown();
+  }
+
+  function updateMpesaCountdown() {
+    const el = document.getElementById('mpesaCountdown');
+    if (mpesaCountSecs > 0) {
+      el.textContent = 'Prompt expires in ' + mpesaCountSecs + 's...';
+      mpesaCountSecs -= 5;
+    }
+  }
+
+  async function pollMpesaStatus() {
+    updateMpesaCountdown();
+
+    if (mpesaCountSecs <= 0) {
+      clearInterval(mpesaCheckInterval);
+      showMpesaResult(false, 'Payment timed out. Please try again.');
+      return;
+    }
+
+    if (!mpesaCheckoutId) return;
+
+    try {
+      const res = await api('/api/client/mpesa/status?checkout_request_id=' + mpesaCheckoutId);
+      if (!res.success) return; // keep polling
+
+      if (res.data.status === 'COMPLETED') {
+        clearInterval(mpesaCheckInterval);
+        showMpesaResult(true, '✅ Payment received! KES ' + res.data.amount + ' deposited successfully. Ref: ' + res.data.mpesa_code);
+        loadDash();
+      } else if (res.data.status === 'FAILED' || res.data.status === 'CANCELLED') {
+        clearInterval(mpesaCheckInterval);
+        showMpesaResult(false, '❌ ' + (res.data.message || 'Payment failed or was cancelled.'));
+      }
+      // if PENDING, keep polling
+    } catch(e) {
+      // network hiccup, keep polling
+    }
+  }
+
+  function showMpesaResult(success, msg) {
+    document.getElementById('mpesaStep2').style.display = 'none';
+    document.getElementById('mpesaStep3').style.display = 'block';
+    if (success) {
+      document.getElementById('mpesaSuccessMsg').textContent = msg;
+      document.getElementById('mpesaSuccessMsg').style.display = 'block';
+      document.getElementById('mpesaFailMsg').style.removeProperty('display');
+      document.getElementById('mpesaFailMsg').style.display = 'none';
+    } else {
+      document.getElementById('mpesaFailMsg').textContent = msg;
+      document.getElementById('mpesaFailMsg').style.display = 'block';
+      document.getElementById('mpesaSuccessMsg').style.display = 'none';
+    }
+  }
+
+  function cancelMpesa() {
+    clearInterval(mpesaCheckInterval);
+    mpesaCheckoutId = null;
+    resetMpesa();
+  }
+
+  function resetMpesa() {
+    document.getElementById('mpesaStep1').style.display = 'block';
+    document.getElementById('mpesaStep2').style.display = 'none';
+    document.getElementById('mpesaStep3').style.display = 'none';
+    document.getElementById('mpesaAmount').value = '';
+    document.getElementById('mpesaPhone').value  = '';
+    document.getElementById('mpesaRateBox').style.display = 'none';
+    document.getElementById('mpesaErr').classList.remove('show');
+  }
+
+  // ── USDT DEPOSIT ─────────────────────────────────────────────────────────────
   async function getDepositAddr(){
     const amt = parseFloat(document.getElementById('depAmount').value||0);
     const net = document.getElementById('depNetwork').value;
@@ -610,7 +918,6 @@
     document.getElementById('depStep1').style.display  = 'none';
     document.getElementById('depStep2').style.display  = 'block';
 
-    // Record pending deposit
     await post('/api/client/deposit/pending',{amount:amt, network:net, address:d.data.address});
   }
 
@@ -755,6 +1062,7 @@
   }
 
   // ── INIT ─────────────────────────────────────────────────────────────────────
+  selectDepMethod('mpesa'); // default to M-Pesa
   loadDash();
 </script>
 </body>

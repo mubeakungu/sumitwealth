@@ -114,77 +114,10 @@
     .up   { color:#00e090; }
     .down { color:#ff4560; }
 
-    /* ── DEPOSIT METHOD SELECTOR ── */
-    .dep-method-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-      margin-bottom: 22px;
-    }
-    .dep-method-card {
-      border: 2px solid #2a2f4a;
-      border-radius: 8px;
-      padding: 16px 14px;
-      cursor: pointer;
-      text-align: center;
-      transition: all 0.2s;
-      background: #0a0e27;
-    }
-    .dep-method-card:hover { border-color: #d4af37; }
-    .dep-method-card.active { border-color: #d4af37; background: rgba(212,175,55,0.07); }
-    .dep-method-card .dep-icon { font-size: 28px; margin-bottom: 8px; }
-    .dep-method-card .dep-title { font-size: 13px; font-weight: bold; color: #fff; margin-bottom: 3px; }
-    .dep-method-card .dep-sub { font-size: 10px; color: #666; }
-    .dep-method-card.active .dep-title { color: #d4af37; }
-
-    /* ── MPESA STK FLOW ── */
-    .mpesa-waiting {
-      text-align: center;
-      padding: 30px 20px;
-    }
-    .mpesa-spinner {
-      width: 50px; height: 50px;
-      border: 4px solid #2a2f4a;
-      border-top-color: #00c853;
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
-      margin: 0 auto 20px;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .mpesa-waiting h3 { color: #00c853; font-size: 16px; margin-bottom: 10px; }
-    .mpesa-waiting p  { color: #aaa; font-size: 13px; line-height: 1.7; }
-    .mpesa-phone-display {
-      background: #0a0e27; border: 1px solid #00c853;
-      border-radius: 6px; padding: 10px 16px;
-      color: #00c853; font-size: 18px; font-weight: bold;
-      font-family: monospace; margin: 14px 0;
-      letter-spacing: 2px;
-    }
-    .mpesa-logo {
-      font-size: 13px; color: #00c853; font-weight: bold;
-      background: rgba(0,200,83,0.1); border: 1px solid rgba(0,200,83,0.3);
-      border-radius: 20px; padding: 4px 14px; display: inline-block;
-      margin-bottom: 16px;
-    }
-    .btn-cancel { 
-      background: transparent; border: 1px solid #555; color: #aaa;
-      padding: 9px 20px; border-radius: 5px; cursor: pointer;
-      font-size: 12px; margin-top: 14px;
-    }
-    .btn-cancel:hover { border-color: #ff4560; color: #ff4560; }
-
-    .exchange-rate-box {
-      background: rgba(212,175,55,0.05); border: 1px solid rgba(212,175,55,0.2);
-      border-radius: 6px; padding: 10px 14px; margin-bottom: 14px;
-      font-size: 12px; color: #aaa; display: flex; justify-content: space-between;
-    }
-    .exchange-rate-box span { color: #d4af37; font-weight: bold; }
-
     @media(max-width:900px) {
       .stats { grid-template-columns:repeat(2,1fr); }
       .charts-grid-top, .charts-grid-bottom { grid-template-columns:1fr; }
       .ref-stats { grid-template-columns:1fr 1fr; }
-      .dep-method-grid { grid-template-columns: 1fr 1fr; }
     }
   </style>
 </head>
@@ -276,143 +209,44 @@
     <button class="tab" id="refTab" onclick="switchTab(event,'referral')">&#127381; Referral <span id="refBadge" style="display:none; background:#00e090; color:#0a0e27; border-radius:20px; padding:1px 7px; font-size:10px; margin-left:4px;"></span></button>
   </div>
 
-  <!-- ══════════════════════════════════════════════════════════════════
-       DEPOSIT TAB — M-Pesa + USDT
-  ══════════════════════════════════════════════════════════════════ -->
+  <!-- DEPOSIT TAB -->
   <div id="deposit" class="tab-content show">
     <div class="panel">
       <h2>Deposit Funds</h2>
 
-      <!-- METHOD SELECTOR -->
-      <div id="depMethodSelect">
-        <div style="font-size:12px; color:#aaa; margin-bottom:14px;">Choose your deposit method:</div>
-        <div class="dep-method-grid">
-          <div class="dep-method-card active" id="methodMpesa" onclick="selectDepMethod('mpesa')">
-            <div class="dep-icon">📱</div>
-            <div class="dep-title">M-Pesa</div>
-            <div class="dep-sub">STK Push to phone • KES</div>
-          </div>
-          <div class="dep-method-card" id="methodUsdt" onclick="selectDepMethod('usdt')">
-            <div class="dep-icon">🪙</div>
-            <div class="dep-title">USDT Crypto</div>
-            <div class="dep-sub">TRC20 / BEP20 / ERC20</div>
-          </div>
+      <!-- Step 1: choose network & amount -->
+      <div id="depStep1">
+        <div class="form-group">
+          <label>Amount (USD)</label>
+          <input type="number" id="depAmount" placeholder="100" min="100">
         </div>
+        <div class="form-group">
+          <label>Network</label>
+          <select id="depNetwork">
+            <option value="TRC20">USDT — TRC20 (Tron) — Recommended</option>
+            <option value="BEP20">USDT — BEP20 (BSC)</option>
+            <option value="ERC20">USDT — ERC20 (Ethereum)</option>
+          </select>
+        </div>
+        <div class="alert alert-info show">Send USDT to your address. Min: $100. Balance updates after admin confirms.</div>
+        <div class="alert alert-error" id="depErr"></div>
+        <button class="btn-gold" onclick="getDepositAddr()">Continue</button>
       </div>
 
-      <!-- ── M-PESA FLOW ── -->
-      <div id="mpesaFlow">
-
-        <!-- Step 1: Enter details -->
-        <div id="mpesaStep1">
-          <div class="alert alert-info show">
-            &#128241; You'll receive an M-Pesa prompt on your phone to confirm payment. Min: 100 dollars.
-          </div>
-          <div class="alert alert-error" id="mpesaErr"></div>
-
-          <div class="form-group">
-            <label>Amount (KES)</label>
-            <input type="number" id="mpesaAmount" placeholder="e.g. 13000" min="100 dollars"
-              oninput="updateMpesaRate()">
-          </div>
-
-          <div class="exchange-rate-box" id="mpesaRateBox" style="display:none;">
-            <div>Approx. USD value</div>
-            <span id="mpesaUsdPreview">—</span>
-          </div>
-
-          <div class="form-group">
-            <label>M-Pesa Phone Number</label>
-            <input type="tel" id="mpesaPhone" placeholder="e.g. 0712345678 or 254712345678"
-              maxlength="13">
-          </div>
-
-          <div class="steps-box" style="margin-bottom:14px;">
-            <strong style="color:#d4af37;">How it works:</strong><br>
-            1. Enter amount &amp; your M-Pesa number<br>
-            2. Click <strong>Send STK Push</strong><br>
-            3. Check your phone — enter M-Pesa PIN<br>
-            4. Balance updates after payment confirmed
-          </div>
-
-          <button class="btn-gold" onclick="initiateMpesa()" id="mpesaBtn">
-            📱 Send M-Pesa Prompt
-          </button>
+      <!-- Step 2: USDT address display -->
+      <div id="depStep2" style="display:none;">
+        <div class="alert alert-success show">Send USDT to this address ONLY on the selected network!</div>
+        <label>Your Deposit Address</label>
+        <div class="address-box" id="depAddress">Loading...</div>
+        <button class="copy-btn" onclick="copyText('depAddress')">&#128203; Copy Address</button>
+        <div class="steps-box" style="margin-top:16px;">
+          <strong style="color:#d4af37;">Steps:</strong><br>
+          1. Open Binance or your wallet<br>
+          2. Withdraw USDT &rarr; paste address &rarr; select <strong id="netLabel"></strong><br>
+          3. Send exactly <strong id="depAmtLabel"></strong> USDT<br>
+          4. Balance updates automatically after admin confirms
         </div>
-
-        <!-- Step 2: Waiting for PIN -->
-        <div id="mpesaStep2" style="display:none;">
-          <div class="mpesa-waiting">
-            <div class="mpesa-logo">🟢 M-PESA</div>
-            <div class="mpesa-spinner"></div>
-            <h3>Waiting for Payment...</h3>
-            <p>An STK Push has been sent to:</p>
-            <div class="mpesa-phone-display" id="mpesaPhoneDisplay">—</div>
-            <p>
-              Enter your <strong style="color:#fff;">M-Pesa PIN</strong> on your phone<br>
-              to confirm the payment of <strong style="color:#d4af37;" id="mpesaAmtDisplay">—</strong>
-            </p>
-            <p style="margin-top:14px; color:#555; font-size:11px;" id="mpesaCountdown">
-              Checking status...
-            </p>
-            <br>
-            <button class="btn-cancel" onclick="cancelMpesa()">✕ Cancel</button>
-          </div>
-        </div>
-
-        <!-- Step 3: Result -->
-        <div id="mpesaStep3" style="display:none;">
-          <div class="alert alert-success show" id="mpesaSuccessMsg"></div>
-          <div class="alert alert-error show" id="mpesaFailMsg" style="display:none!important;"></div>
-          <div class="steps-box">
-            Your account balance will reflect the deposit shortly.<br>
-            If you have any issues, contact support with your M-Pesa transaction code.
-          </div>
-          <button class="btn-gold" onclick="resetMpesa()" style="margin-top:15px;">
-            ← Make Another Deposit
-          </button>
-        </div>
-
-      </div>
-
-      <!-- ── USDT FLOW ── -->
-      <div id="usdtFlow" style="display:none;">
-
-        <!-- Step 1: choose network & amount -->
-        <div id="depStep1">
-          <div class="form-group">
-            <label>Amount (USD)</label>
-            <input type="number" id="depAmount" placeholder="100" min="100">
-          </div>
-          <div class="form-group">
-            <label>Network</label>
-            <select id="depNetwork">
-              <option value="TRC20">USDT — TRC20 (Tron) — Recommended</option>
-              <option value="BEP20">USDT — BEP20 (BSC)</option>
-              <option value="ERC20">USDT — ERC20 (Ethereum)</option>
-            </select>
-          </div>
-          <div class="alert alert-info show">Send USDT to your address. Min: $100. Balance updates after admin confirms.</div>
-          <div class="alert alert-error" id="depErr"></div>
-          <button class="btn-gold" onclick="getDepositAddr()">Continue</button>
-        </div>
-
-        <!-- Step 2: USDT address display -->
-        <div id="depStep2" style="display:none;">
-          <div class="alert alert-success show">Send USDT to this address ONLY on the selected network!</div>
-          <label>Your Deposit Address</label>
-          <div class="address-box" id="depAddress">Loading...</div>
-          <button class="copy-btn" onclick="copyText('depAddress')">&#128203; Copy Address</button>
-          <div class="steps-box" style="margin-top:16px;">
-            <strong style="color:#d4af37;">Steps:</strong><br>
-            1. Open Binance or your wallet<br>
-            2. Deposit USDT &rarr; paste address &rarr; select <strong id="netLabel"></strong><br>
-            3. Send exactly <strong id="depAmtLabel"></strong> USDT<br>
-            4. Balance updates automatically after admin confirms
-          </div>
-          <button class="btn-gold" onclick="resetDep()" style="margin-top:15px; background:#333; color:#aaa;">&#8592; Back</button>
-        </div>
-
+        <button class="btn-gold" onclick="resetDep()" style="margin-top:15px; background:#333; color:#aaa;">&#8592; Back</button>
       </div>
 
     </div>
@@ -761,149 +595,7 @@
     loadReferralHistory();
   }
 
-  // ── DEPOSIT METHOD SELECTOR ──────────────────────────────────────────────────
-  let activeDepMethod = 'mpesa';
-
-  function selectDepMethod(method) {
-    activeDepMethod = method;
-    document.getElementById('methodMpesa').classList.toggle('active', method === 'mpesa');
-    document.getElementById('methodUsdt').classList.toggle('active',  method === 'usdt');
-    document.getElementById('mpesaFlow').style.display = method === 'mpesa' ? 'block' : 'none';
-    document.getElementById('usdtFlow').style.display  = method === 'usdt'  ? 'block' : 'none';
-  }
-
-  // ── M-PESA STK PUSH ─────────────────────────────────────────────────────────
-  const KES_USD_RATE = 129.5; // update periodically or fetch from /api/forex
-  let mpesaCheckInterval = null;
-  let mpesaCheckoutId    = null;
-  let mpesaCountSecs     = 0;
-
-  function updateMpesaRate() {
-    const kes = parseFloat(document.getElementById('mpesaAmount').value || 0);
-    const box = document.getElementById('mpesaRateBox');
-    if (kes >= 500) {
-      const usd = (kes / KES_USD_RATE).toFixed(2);
-      document.getElementById('mpesaUsdPreview').textContent = '≈ $' + usd;
-      box.style.display = 'flex';
-    } else {
-      box.style.display = 'none';
-    }
-  }
-
-  function formatPhone(raw) {
-    // Normalize to 254XXXXXXXXX
-    raw = raw.replace(/\s+/g, '').replace(/^0/, '254').replace(/^\+/, '');
-    return raw;
-  }
-
-  async function initiateMpesa() {
-    const kesAmt = parseFloat(document.getElementById('mpesaAmount').value || 0);
-    const phone  = formatPhone(document.getElementById('mpesaPhone').value.trim());
-
-    if (kesAmt < 500) { showErr('mpesaErr', 'Minimum deposit is KES 500'); return; }
-    if (!phone || phone.length < 12) { showErr('mpesaErr', 'Enter a valid M-Pesa phone number'); return; }
-
-    const btn = document.getElementById('mpesaBtn');
-    btn.disabled = true;
-    btn.textContent = 'Sending prompt...';
-
-    const res = await post('/api/client/mpesa/stk-push', {
-      phone_number: phone,
-      amount: kesAmt
-    });
-
-    btn.disabled = false;
-    btn.textContent = '📱 Send M-Pesa Prompt';
-
-    if (!res.success) {
-      showErr('mpesaErr', res.error || 'Failed to send STK Push. Try again.');
-      return;
-    }
-
-    // Store checkout ID for polling
-    mpesaCheckoutId = res.data.checkout_request_id;
-
-    // Show waiting screen
-    document.getElementById('mpesaStep1').style.display = 'none';
-    document.getElementById('mpesaStep2').style.display = 'block';
-    document.getElementById('mpesaPhoneDisplay').textContent = document.getElementById('mpesaPhone').value;
-    document.getElementById('mpesaAmtDisplay').textContent   = 'KES ' + kesAmt.toLocaleString();
-
-    // Start polling every 5 seconds, timeout after 90 seconds
-    mpesaCountSecs = 90;
-    mpesaCheckInterval = setInterval(pollMpesaStatus, 5000);
-    updateMpesaCountdown();
-  }
-
-  function updateMpesaCountdown() {
-    const el = document.getElementById('mpesaCountdown');
-    if (mpesaCountSecs > 0) {
-      el.textContent = 'Prompt expires in ' + mpesaCountSecs + 's...';
-      mpesaCountSecs -= 5;
-    }
-  }
-
-  async function pollMpesaStatus() {
-    updateMpesaCountdown();
-
-    if (mpesaCountSecs <= 0) {
-      clearInterval(mpesaCheckInterval);
-      showMpesaResult(false, 'Payment timed out. Please try again.');
-      return;
-    }
-
-    if (!mpesaCheckoutId) return;
-
-    try {
-      const res = await api('/api/client/mpesa/status?checkout_request_id=' + mpesaCheckoutId);
-      if (!res.success) return; // keep polling
-
-      if (res.data.status === 'COMPLETED') {
-        clearInterval(mpesaCheckInterval);
-        showMpesaResult(true, '✅ Payment received! KES ' + res.data.amount + ' deposited successfully. Ref: ' + res.data.mpesa_code);
-        loadDash();
-      } else if (res.data.status === 'FAILED' || res.data.status === 'CANCELLED') {
-        clearInterval(mpesaCheckInterval);
-        showMpesaResult(false, '❌ ' + (res.data.message || 'Payment failed or was cancelled.'));
-      }
-      // if PENDING, keep polling
-    } catch(e) {
-      // network hiccup, keep polling
-    }
-  }
-
-  function showMpesaResult(success, msg) {
-    document.getElementById('mpesaStep2').style.display = 'none';
-    document.getElementById('mpesaStep3').style.display = 'block';
-    if (success) {
-      document.getElementById('mpesaSuccessMsg').textContent = msg;
-      document.getElementById('mpesaSuccessMsg').style.display = 'block';
-      document.getElementById('mpesaFailMsg').style.removeProperty('display');
-      document.getElementById('mpesaFailMsg').style.display = 'none';
-    } else {
-      document.getElementById('mpesaFailMsg').textContent = msg;
-      document.getElementById('mpesaFailMsg').style.display = 'block';
-      document.getElementById('mpesaSuccessMsg').style.display = 'none';
-    }
-  }
-
-  function cancelMpesa() {
-    clearInterval(mpesaCheckInterval);
-    mpesaCheckoutId = null;
-    resetMpesa();
-  }
-
-  function resetMpesa() {
-    document.getElementById('mpesaStep1').style.display = 'block';
-    document.getElementById('mpesaStep2').style.display = 'none';
-    document.getElementById('mpesaStep3').style.display = 'none';
-    document.getElementById('mpesaAmount').value = '';
-    document.getElementById('mpesaPhone').value  = '';
-    document.getElementById('mpesaRateBox').style.display = 'none';
-    document.getElementById('mpesaErr').classList.remove('show');
-  }
-
-  // ── USDT DEPOSIT ─────────────────────────────────────────────────────────────
+  // ── DEPOSIT ─────────────────────────────────────────────────────────────────
   async function getDepositAddr(){
     const amt = parseFloat(document.getElementById('depAmount').value||0);
     const net = document.getElementById('depNetwork').value;
@@ -918,6 +610,7 @@
     document.getElementById('depStep1').style.display  = 'none';
     document.getElementById('depStep2').style.display  = 'block';
 
+    // Record pending deposit
     await post('/api/client/deposit/pending',{amount:amt, network:net, address:d.data.address});
   }
 
@@ -1062,7 +755,767 @@
   }
 
   // ── INIT ─────────────────────────────────────────────────────────────────────
-  selectDepMethod('mpesa'); // default to M-Pesa
+  loadDash();
+</script>
+</body>
+</html>
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Summit Dashboard</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:Arial,sans-serif; background:#0a0e27; color:#fff; }
+
+    .navbar {
+      background:#1a1f3a; padding:14px 30px;
+      border-bottom:2px solid #d4af37;
+      display:flex; justify-content:space-between; align-items:center;
+    }
+    .nav-brand { font-size:18px; color:#d4af37; font-weight:bold; }
+    .nav-right  { display:flex; align-items:center; gap:15px; }
+    .btn-red  { padding:8px 16px; background:#ff4560; color:#fff; border:none; border-radius:5px; cursor:pointer; font-size:13px; }
+    .btn-gold { background:#d4af37; color:#0a0e27; width:100%; padding:12px; margin-top:10px; font-weight:bold; border:none; border-radius:5px; cursor:pointer; font-size:14px; }
+    .btn-gold:disabled { opacity:0.5; cursor:not-allowed; }
+    .btn-outline { background:transparent; border:1px solid #d4af37; color:#d4af37; padding:6px 14px; border-radius:5px; cursor:pointer; font-size:12px; }
+
+    .container { max-width:1300px; margin:0 auto; padding:25px 30px; }
+
+    .stats { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin-bottom:25px; }
+    .stat  { background:#1a1f3a; border:1px solid #2a2f4a; padding:18px 20px; border-radius:8px; }
+    .stat-label { font-size:11px; color:#aaa; text-transform:uppercase; letter-spacing:0.5px; }
+    .stat-val   { font-size:20px; color:#d4af37; font-weight:bold; margin-top:8px; }
+    .stat-sub   { font-size:11px; margin-top:4px; color:#aaa; }
+
+    .charts-grid-top    { display:grid; grid-template-columns:2fr 1fr; gap:15px; margin-bottom:15px; }
+    .charts-grid-bottom { display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:25px; }
+    .chart-card { background:#1a1f3a; border:1px solid #2a2f4a; border-radius:8px; padding:18px; }
+    .chart-card h3 { font-size:13px; color:#d4af37; margin-bottom:4px; display:flex; justify-content:space-between; align-items:center; }
+    .chart-subtitle { font-size:11px; color:#666; margin-bottom:14px; }
+    .chart-price-live   { font-size:22px; font-weight:bold; color:#fff; margin-bottom:2px; }
+    .chart-price-change { font-size:12px; margin-bottom:12px; }
+    .coin-tabs { display:flex; gap:6px; margin-bottom:12px; }
+    .coin-tab  { padding:4px 12px; font-size:11px; border-radius:20px; border:1px solid #333; background:transparent; color:#aaa; cursor:pointer; }
+    .coin-tab.active { background:#d4af37; color:#0a0e27; border-color:#d4af37; font-weight:bold; }
+
+    .tabs { display:flex; gap:5px; margin-bottom:20px; flex-wrap:wrap; }
+    .tab  { padding:10px 20px; background:#1a1f3a; border:1px solid #333; cursor:pointer; color:#aaa; border-radius:5px; font-size:13px; }
+    .tab.active { background:#d4af37; color:#0a0e27; font-weight:bold; border-color:#d4af37; }
+    .tab-content { display:none; }
+    .tab-content.show { display:block; }
+
+    .panel { background:#1a1f3a; border:1px solid #2a2f4a; padding:22px; border-radius:8px; max-width:620px; }
+    .panel-wide { max-width:100%; }
+    .panel h2 { margin-bottom:20px; font-size:16px; }
+
+    .form-group { margin-bottom:15px; }
+    label { display:block; margin-bottom:5px; font-size:11px; color:#aaa; letter-spacing:0.5px; }
+    input, select { width:100%; padding:10px 12px; border:1px solid #333; background:#0a0e27; color:#fff; border-radius:5px; font-size:13px; }
+    input:focus, select:focus { outline:none; border-color:#d4af37; }
+
+    .alert { padding:10px 14px; border-radius:5px; margin-bottom:15px; font-size:12px; display:none; }
+    .alert.show   { display:block; }
+    .alert-error  { background:rgba(255,69,96,0.15);   border:1px solid #ff4560; color:#ff4560; }
+    .alert-success{ background:rgba(0,224,144,0.15);   border:1px solid #00e090; color:#00e090; }
+    .alert-info   { background:rgba(0,136,255,0.15);   border:1px solid #0088ff; color:#0088ff; }
+    .alert-warning{ background:rgba(255,165,0,0.15);   border:1px solid #ffa500; color:#ffa500; }
+
+    .address-box {
+      background:#0a0e27; border:1px solid #d4af37;
+      padding:14px; border-radius:5px; margin:15px 0;
+      font-family:monospace; font-size:12px; word-break:break-all; color:#d4af37;
+    }
+    .copy-btn { padding:7px 14px; background:#333; color:#d4af37; border:1px solid #d4af37; border-radius:5px; cursor:pointer; font-size:11px; }
+    .copy-btn:hover { background:#d4af37; color:#0a0e27; }
+
+    .tbl { width:100%; border-collapse:collapse; font-size:12px; }
+    .tbl th { padding:10px 12px; text-align:left; color:#d4af37; background:rgba(212,175,55,0.08); border-bottom:1px solid #333; }
+    .tbl td { padding:10px 12px; border-bottom:1px solid #1e2440; vertical-align:middle; }
+    .badge { display:inline-block; padding:2px 8px; border-radius:20px; font-size:10px; font-weight:bold; text-transform:uppercase; }
+    .badge-pending   { background:rgba(255,200,0,0.15);  color:#ffc800; }
+    .badge-completed { background:rgba(0,224,144,0.15);  color:#00e090; }
+    .badge-rejected  { background:rgba(255,69,96,0.15);  color:#ff4560; }
+    .badge-open      { background:rgba(0,136,255,0.15);  color:#0088ff; }
+    .badge-closed    { background:rgba(150,150,150,0.15); color:#aaa; }
+    .type-deposit    { color:#00e090; font-weight:bold; }
+    .type-withdrawal { color:#ff4560; font-weight:bold; }
+    .type-ref        { color:#d4af37; font-weight:bold; }
+
+    .ref-card {
+      background:linear-gradient(135deg, #1a1f3a 0%, #0f1428 100%);
+      border:1px solid #d4af37; border-radius:10px; padding:24px; margin-bottom:20px;
+    }
+    .ref-card h3 { color:#d4af37; margin-bottom:6px; font-size:15px; }
+    .ref-link-box {
+      background:#0a0e27; border:1px solid #333;
+      border-radius:6px; padding:12px 14px; margin:14px 0;
+      font-family:monospace; font-size:12px; color:#aaa;
+      display:flex; justify-content:space-between; align-items:center; gap:10px;
+      word-break:break-all;
+    }
+    .ref-stats { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin:16px 0; }
+    .ref-stat  { background:#0a0e27; border:1px solid #2a2f4a; padding:14px; border-radius:6px; text-align:center; }
+    .ref-stat-val   { font-size:20px; color:#d4af37; font-weight:bold; }
+    .ref-stat-label { font-size:10px; color:#555; margin-top:4px; text-transform:uppercase; }
+    .ref-balance-box {
+      background:rgba(0,224,144,0.06); border:1px solid rgba(0,224,144,0.3);
+      border-radius:8px; padding:16px; margin:16px 0;
+      display:flex; justify-content:space-between; align-items:center;
+    }
+    .ref-balance-val { font-size:24px; color:#00e090; font-weight:bold; }
+    .steps-box { background:#0a0e27; border-radius:6px; padding:14px; font-size:12px; line-height:2; margin-top:14px; }
+
+    .pending-notice {
+      background:rgba(255,200,0,0.08); border:1px solid rgba(255,200,0,0.3);
+      border-radius:5px; padding:8px 12px; margin-top:6px;
+      font-size:11px; color:#ffc800; display:none;
+    }
+
+    .up   { color:#00e090; }
+    .down { color:#ff4560; }
+
+    @media(max-width:900px) {
+      .stats { grid-template-columns:repeat(2,1fr); }
+      .charts-grid-top, .charts-grid-bottom { grid-template-columns:1fr; }
+      .ref-stats { grid-template-columns:1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="navbar">
+  <div class="nav-brand">&#128176; SUMMIT WEALTH</div>
+  <div class="nav-right">
+    <span id="username" style="color:#aaa; font-size:13px;"></span>
+    <button class="btn-red" onclick="logout()">Logout</button>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- STATS ROW -->
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-label">Account Balance</div>
+      <div class="stat-val">$<span id="balance">0.00</span></div>
+      <div class="stat-sub">Available funds</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Equity</div>
+      <div class="stat-val">$<span id="equity">0.00</span></div>
+      <div class="stat-sub">Total value</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Total Deposited</div>
+      <div class="stat-val">$<span id="deposited">0.00</span></div>
+      <div class="stat-sub up" id="dep-count"></div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Total Withdrawn</div>
+      <div class="stat-val">$<span id="withdrawn">0.00</span></div>
+      <div class="stat-sub down" id="wdr-pending-label"></div>
+    </div>
+    <div class="stat" style="border-color:rgba(212,175,55,0.4); cursor:pointer;" onclick="switchTabByName('referral')">
+      <div class="stat-label">Referral Earnings</div>
+      <div class="stat-val" style="color:#00e090;">$<span id="refBalance">0.00</span></div>
+      <div class="stat-sub" style="color:#d4af37;"><span id="refCount">0</span> referrals &#8594;</div>
+    </div>
+  </div>
+
+  <!-- CHARTS -->
+  <div class="charts-grid-top">
+    <div class="chart-card">
+      <h3>
+        Live Price Chart
+        <span style="font-size:11px; color:#666;" id="priceUpdated">Updating...</span>
+      </h3>
+      <div class="chart-subtitle">Real-time market data</div>
+      <div class="coin-tabs">
+        <button class="coin-tab active" onclick="switchCoin('BTC',this)">BTC/USDT</button>
+        <button class="coin-tab" onclick="switchCoin('ETH',this)">ETH/USDT</button>
+        <button class="coin-tab" onclick="switchCoin('BNB',this)">BNB/USDT</button>
+      </div>
+      <div class="chart-price-live" id="livePrice">--</div>
+      <div class="chart-price-change" id="priceChange">--</div>
+      <canvas id="priceChart" height="130"></canvas>
+    </div>
+    <div class="chart-card">
+      <h3>Profit / Loss</h3>
+      <div class="chart-subtitle">Running P&amp;L based on activity</div>
+      <div class="chart-price-live" id="plValue" style="font-size:18px;">$0.00</div>
+      <div class="chart-price-change" id="plChange">--</div>
+      <canvas id="plChart" height="170"></canvas>
+    </div>
+  </div>
+  <div class="charts-grid-bottom">
+    <div class="chart-card">
+      <h3>Balance Over Time</h3>
+      <div class="chart-subtitle">Account balance progression</div>
+      <canvas id="balanceChart" height="160"></canvas>
+    </div>
+    <div class="chart-card">
+      <h3>Deposits vs Withdrawals</h3>
+      <div class="chart-subtitle">Transaction summary by month</div>
+      <canvas id="txChart" height="160"></canvas>
+    </div>
+  </div>
+
+  <!-- TABS -->
+  <div class="tabs">
+    <button class="tab active"  onclick="switchTab(event,'deposit')">&#8593; Deposit</button>
+    <button class="tab"         onclick="switchTab(event,'withdraw')">&#8595; Withdraw USDT</button>
+    <button class="tab"         onclick="switchTab(event,'history')">&#9776; Transactions</button>
+    <button class="tab"         onclick="switchTab(event,'trades')">&#128200; Trades</button>
+    <button class="tab" id="refTab" onclick="switchTab(event,'referral')">&#127381; Referral <span id="refBadge" style="display:none; background:#00e090; color:#0a0e27; border-radius:20px; padding:1px 7px; font-size:10px; margin-left:4px;"></span></button>
+  </div>
+
+  <!-- DEPOSIT TAB -->
+  <div id="deposit" class="tab-content show">
+    <div class="panel">
+      <h2>Deposit Funds</h2>
+
+      <!-- Step 1: choose network & amount -->
+      <div id="depStep1">
+        <div class="form-group">
+          <label>Amount (USD)</label>
+          <input type="number" id="depAmount" placeholder="100" min="100">
+        </div>
+        <div class="form-group">
+          <label>Network</label>
+          <select id="depNetwork">
+            <option value="TRC20">USDT — TRC20 (Tron) — Recommended</option>
+            <option value="BEP20">USDT — BEP20 (BSC)</option>
+            <option value="ERC20">USDT — ERC20 (Ethereum)</option>
+          </select>
+        </div>
+        <div class="alert alert-info show">Send USDT to your address. Min: $100. Balance updates after admin confirms.</div>
+        <div class="alert alert-error" id="depErr"></div>
+        <button class="btn-gold" onclick="getDepositAddr()">Continue</button>
+      </div>
+
+      <!-- Step 2: USDT address display -->
+      <div id="depStep2" style="display:none;">
+        <div class="alert alert-success show">Send USDT to this address ONLY on the selected network!</div>
+        <label>Your Deposit Address</label>
+        <div class="address-box" id="depAddress">Loading...</div>
+        <button class="copy-btn" onclick="copyText('depAddress')">&#128203; Copy Address</button>
+        <div class="steps-box" style="margin-top:16px;">
+          <strong style="color:#d4af37;">Steps:</strong><br>
+          1. Open Binance or your wallet<br>
+          2. Withdraw USDT &rarr; paste address &rarr; select <strong id="netLabel"></strong><br>
+          3. Send exactly <strong id="depAmtLabel"></strong> USDT<br>
+          4. Balance updates automatically after admin confirms
+        </div>
+        <button class="btn-gold" onclick="resetDep()" style="margin-top:15px; background:#333; color:#aaa;">&#8592; Back</button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- WITHDRAW TAB -->
+  <div id="withdraw" class="tab-content">
+    <div class="panel">
+      <h2>Withdraw USDT</h2>
+      <div class="alert alert-info show">Min: $1,000. Processed within 24hrs after admin approval.</div>
+      <div style="font-size:18px; color:#d4af37; font-weight:bold; margin-bottom:4px;">
+        Available: $<span id="wdrBal">0.00</span>
+      </div>
+      <div id="wdrPendingNotice" class="pending-notice">
+        &#9888; You have $<span id="wdrPendingAmt">0.00</span> in pending withdrawals awaiting admin approval.
+      </div>
+      <div style="margin-bottom:16px;"></div>
+      <div class="alert alert-error"   id="wdrErr"></div>
+      <div class="alert alert-success" id="wdrOk"></div>
+      <div class="form-group">
+        <label>Amount (USDT)</label>
+        <input type="number" id="wdrAmount" placeholder="1000" min="1000">
+      </div>
+      <div class="form-group">
+        <label>Network</label>
+        <select id="wdrNetwork">
+          <option value="TRC20">TRC20 (Tron)</option>
+          <option value="BEP20">BEP20 (BSC)</option>
+          <option value="ERC20">ERC20 (Ethereum)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Your USDT Wallet Address</label>
+        <input type="text" id="wdrAddr" placeholder="Paste your USDT wallet address">
+      </div>
+      <div class="form-group">
+        <label>PIN (6 digits)</label>
+        <input type="password" id="wdrPin" maxlength="6" placeholder="••••••">
+      </div>
+      <button class="btn-gold" onclick="withdraw()">Send USDT Now</button>
+    </div>
+  </div>
+
+  <!-- TRANSACTIONS TAB -->
+  <div id="history" class="tab-content">
+    <div class="panel panel-wide">
+      <h2>Transaction History</h2>
+      <div id="historyList" style="color:#aaa; padding:20px 0;">Loading...</div>
+    </div>
+  </div>
+
+  <!-- TRADES TAB -->
+  <div id="trades" class="tab-content">
+    <div class="panel panel-wide">
+      <h2>&#128200; My Trades</h2>
+      <div id="tradesList" style="color:#aaa; padding:20px 0;">Loading...</div>
+    </div>
+  </div>
+
+  <!-- REFERRAL TAB -->
+  <div id="referral" class="tab-content">
+
+    <div class="ref-card">
+      <h3>&#127381; Your Referral Program</h3>
+      <p style="color:#aaa; font-size:13px; margin-bottom:4px;">
+        Share your link. Earn <strong style="color:#d4af37;">16% commission</strong>
+        every time someone you refer makes their first deposit of $100 or more.
+      </p>
+
+      <div style="margin-top:14px;">
+        <label>Your Referral Link</label>
+        <div class="ref-link-box">
+          <span id="refLink">Loading...</span>
+          <button class="copy-btn" onclick="copyText('refLink')" style="white-space:nowrap;">&#128203; Copy</button>
+        </div>
+      </div>
+
+      <div style="margin-top:6px;">
+        <label>Your Referral Code</label>
+        <div style="display:flex; gap:10px; align-items:center; margin-top:6px;">
+          <div class="address-box" id="refCode" style="margin:0; flex:1; font-size:18px; letter-spacing:4px; text-align:center; padding:10px;">--</div>
+          <button class="copy-btn" onclick="copyText('refCode')">&#128203; Copy</button>
+        </div>
+      </div>
+
+      <div class="ref-stats">
+        <div class="ref-stat">
+          <div class="ref-stat-val" id="refStatCount">0</div>
+          <div class="ref-stat-label">People Referred</div>
+        </div>
+        <div class="ref-stat">
+          <div class="ref-stat-val" id="refStatEarned">$0.00</div>
+          <div class="ref-stat-label">Total Earned</div>
+        </div>
+        <div class="ref-stat">
+          <div class="ref-stat-val" style="color:#00e090;" id="refStatBal">$0.00</div>
+          <div class="ref-stat-label">Available to Withdraw</div>
+        </div>
+      </div>
+
+      <div class="steps-box">
+        <strong style="color:#d4af37;">How it works:</strong><br>
+        1. Share your referral link with friends<br>
+        2. They register using your link and make a deposit of $100+<br>
+        3. You instantly receive <strong style="color:#d4af37;">16% of their deposit</strong> as USDT<br>
+        4. Withdraw your earnings to any USDT wallet anytime
+      </div>
+    </div>
+
+    <div class="panel" style="margin-bottom:20px;">
+      <h2>&#128176; Withdraw Referral Earnings</h2>
+      <div class="ref-balance-box">
+        <div>
+          <div style="font-size:11px; color:#aaa; margin-bottom:4px;">AVAILABLE BALANCE</div>
+          <div class="ref-balance-val">$<span id="refWithdrawBal">0.00</span></div>
+        </div>
+        <div style="font-size:12px; color:#aaa; text-align:right;">
+          Paid as USDT<br>via Binance
+        </div>
+      </div>
+
+      <div class="alert alert-error"   id="refWdrErr"></div>
+      <div class="alert alert-success" id="refWdrOk"></div>
+
+      <div class="form-group">
+        <label>Network</label>
+        <select id="refWdrNetwork">
+          <option value="TRC20">TRC20 (Tron) — Recommended</option>
+          <option value="BEP20">BEP20 (BSC)</option>
+          <option value="ERC20">ERC20 (Ethereum)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Your USDT Wallet Address</label>
+        <input type="text" id="refWdrAddr" placeholder="Paste your USDT wallet address">
+      </div>
+      <div class="form-group">
+        <label>PIN (6 digits)</label>
+        <input type="password" id="refWdrPin" maxlength="6" placeholder="••••••">
+      </div>
+      <button class="btn-gold" onclick="withdrawReferral()">Withdraw Referral Earnings</button>
+    </div>
+
+    <div class="panel panel-wide">
+      <h2>&#128202; Referral History</h2>
+      <div id="refHistoryList" style="color:#aaa; padding:10px 0;">Loading...</div>
+    </div>
+
+  </div>
+
+</div>
+
+<script>
+  const api  = (url, opts={}) => fetch(url, {credentials:'same-origin', ...opts}).then(r=>r.json());
+  const post = (u,b) => api(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+  const fmt  = n => parseFloat(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+
+  Chart.defaults.color        = '#666';
+  Chart.defaults.borderColor  = '#1e2440';
+  Chart.defaults.font.family  = 'Arial';
+
+  // ── PRICE CHARTS ────────────────────────────────────────────────────────────
+  const SEEDS = {BTC:67500, ETH:3450, BNB:580};
+  const prices = {};
+  let activeCoin = 'BTC';
+  let priceChart, plChart, balanceChart, txChart;
+
+  function genHistory(base, pts=40) {
+    const a=[]; let p=base*(0.97+Math.random()*0.06);
+    for(let i=0;i<pts;i++){p=p*(1+(Math.random()-0.495)*0.012);a.push(parseFloat(p.toFixed(2)));}
+    return a;
+  }
+  Object.keys(SEEDS).forEach(c=>{prices[c]=genHistory(SEEDS[c]);});
+
+  function lastN(arr,n){return arr.slice(-n);}
+  function timeLabels(n){
+    const l=[],now=new Date();
+    for(let i=n-1;i>=0;i--){const d=new Date(now-i*90000);l.push(d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0'));}
+    return l;
+  }
+
+  function buildPriceChart(){
+    const ctx=document.getElementById('priceChart').getContext('2d');
+    const data=lastN(prices[activeCoin],30);
+    const color=data[data.length-1]>=data[0]?'#00e090':'#ff4560';
+    const fill=data[data.length-1]>=data[0]?'rgba(0,224,144,0.08)':'rgba(255,69,96,0.08)';
+    if(priceChart)priceChart.destroy();
+    priceChart=new Chart(ctx,{type:'line',data:{labels:timeLabels(30),datasets:[{data,borderColor:color,backgroundColor:fill,borderWidth:2,pointRadius:0,fill:true,tension:0.4}]},options:{responsive:true,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>'$'+fmt(c.parsed.y)}}},scales:{x:{ticks:{maxTicksLimit:6,font:{size:10}},grid:{color:'#1e2440'}},y:{ticks:{callback:v=>'$'+fmt(v),font:{size:10}},grid:{color:'#1e2440'}}}}});
+    updatePriceHeader();
+  }
+  function updatePriceHeader(){
+    const arr=prices[activeCoin],cur=arr[arr.length-1],prev=arr[arr.length-2]||cur;
+    const pct=((cur-prev)/prev*100).toFixed(2);
+    document.getElementById('livePrice').textContent='$'+fmt(cur);
+    const el=document.getElementById('priceChange');
+    el.textContent=(pct>=0?'+':'')+pct+'% (last tick)';
+    el.className='chart-price-change '+(pct>=0?'up':'down');
+    document.getElementById('priceUpdated').textContent='Live';
+  }
+  function switchCoin(coin,btn){
+    activeCoin=coin;
+    document.querySelectorAll('.coin-tab').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active'); buildPriceChart();
+  }
+  setInterval(()=>{
+    Object.keys(prices).forEach(c=>{
+      const last=prices[c][prices[c].length-1];
+      prices[c].push(parseFloat((last*(1+(Math.random()-0.495)*0.008)).toFixed(2)));
+      if(prices[c].length>200)prices[c].shift();
+    });
+    if(priceChart){
+      const data=lastN(prices[activeCoin],30);
+      const color=data[data.length-1]>=data[0]?'#00e090':'#ff4560';
+      priceChart.data.labels=timeLabels(30);
+      priceChart.data.datasets[0].data=data;
+      priceChart.data.datasets[0].borderColor=color;
+      priceChart.update('none'); updatePriceHeader();
+    }
+  },2000);
+
+  function buildPLChart(txs){
+    const ctx=document.getElementById('plChart').getContext('2d');
+    let running=0; const labels=[],plData=[];
+    const sorted=[...txs].sort((a,b)=>(a.created_at||'').localeCompare(b.created_at||''));
+    if(!sorted.length){labels.push('Start','Now');plData.push(0,0);}
+    else{
+      labels.push('Start');plData.push(0);
+      sorted.forEach(t=>{
+        if(t.status==='COMPLETED'){
+          if(t.type==='DEPOSIT')running+=t.amount_usd;
+          if(t.type==='WITHDRAWAL'||t.type==='REFERRAL_WITHDRAWAL')running-=t.amount_usd;
+          labels.push((t.created_at||'').substring(5,10));
+          plData.push(parseFloat(running.toFixed(2)));
+        }
+      });
+    }
+    const net=plData[plData.length-1];
+    document.getElementById('plValue').textContent='$'+fmt(net);
+    const el=document.getElementById('plChange');
+    el.textContent=net>=0?'Net positive':'Net negative';
+    el.className='chart-price-change '+(net>=0?'up':'down');
+    if(plChart)plChart.destroy();
+    plChart=new Chart(ctx,{type:'line',data:{labels,datasets:[{data:plData,borderColor:net>=0?'#00e090':'#ff4560',backgroundColor:net>=0?'rgba(0,224,144,0.1)':'rgba(255,69,96,0.1)',borderWidth:2,pointRadius:3,pointBackgroundColor:'#d4af37',fill:true,tension:0.3}]},options:{responsive:true,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>'$'+fmt(c.parsed.y)}}},scales:{x:{ticks:{font:{size:9},maxTicksLimit:5},grid:{color:'#1e2440'}},y:{ticks:{callback:v=>'$'+fmt(v),font:{size:9}},grid:{color:'#1e2440'}}}}});
+  }
+
+  function buildBalanceChart(balance,txs){
+    const ctx=document.getElementById('balanceChart').getContext('2d');
+    let running=balance;
+    const sorted=[...txs].filter(t=>t.status==='COMPLETED').sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||''));
+    const pts=[{label:'Now',val:balance}];
+    sorted.forEach(t=>{
+      if(t.type==='DEPOSIT')running-=t.amount_usd;
+      if(t.type==='WITHDRAWAL'||t.type==='REFERRAL_WITHDRAWAL')running+=t.amount_usd;
+      pts.push({label:(t.created_at||'').substring(5,10),val:parseFloat(running.toFixed(2))});
+    });
+    pts.reverse();
+    if(balanceChart)balanceChart.destroy();
+    balanceChart=new Chart(ctx,{type:'line',data:{labels:pts.map(p=>p.label),datasets:[{data:pts.map(p=>p.val),borderColor:'#d4af37',backgroundColor:'rgba(212,175,55,0.08)',borderWidth:2,pointRadius:3,pointBackgroundColor:'#d4af37',fill:true,tension:0.4}]},options:{responsive:true,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>'$'+fmt(c.parsed.y)}}},scales:{x:{ticks:{font:{size:9},maxTicksLimit:6},grid:{color:'#1e2440'}},y:{ticks:{callback:v=>'$'+fmt(v),font:{size:9}},grid:{color:'#1e2440'}}}}});
+  }
+
+  function buildTxChart(txs){
+    const ctx=document.getElementById('txChart').getContext('2d');
+    const months={};
+    txs.filter(t=>t.status==='COMPLETED').forEach(t=>{
+      const mo=(t.created_at||'').substring(0,7); if(!mo)return;
+      if(!months[mo])months[mo]={dep:0,wdr:0};
+      if(t.type==='DEPOSIT')months[mo].dep+=t.amount_usd;
+      if(t.type==='WITHDRAWAL'||t.type==='REFERRAL_WITHDRAWAL')months[mo].wdr+=t.amount_usd;
+    });
+    const labels=Object.keys(months).sort();
+    if(!labels.length){labels.push(new Date().toISOString().substring(0,7));months[labels[0]]={dep:0,wdr:0};}
+    if(txChart)txChart.destroy();
+    txChart=new Chart(ctx,{type:'bar',data:{labels,datasets:[{label:'Deposits',data:labels.map(m=>months[m].dep),backgroundColor:'rgba(0,224,144,0.7)',borderRadius:4},{label:'Withdrawals',data:labels.map(m=>months[m].wdr),backgroundColor:'rgba(255,69,96,0.7)',borderRadius:4}]},options:{responsive:true,plugins:{legend:{labels:{color:'#aaa',font:{size:11},boxWidth:12}},tooltip:{callbacks:{label:c=>'$'+fmt(c.parsed.y)}}},scales:{x:{ticks:{font:{size:9}},grid:{color:'#1e2440'}},y:{ticks:{callback:v=>'$'+fmt(v),font:{size:9}},grid:{color:'#1e2440'}}}}});
+  }
+
+  // ── LOAD DASHBOARD ──────────────────────────────────────────────────────────
+  async function loadDash(){
+    const [sumRes, txRes] = await Promise.all([
+      api('/api/client/summary'),
+      api('/api/client/transactions')
+    ]);
+
+    if(!sumRes.success){ window.location='/'; return; }
+    const s   = sumRes.data;
+    const txs = txRes.data || [];
+
+    document.getElementById('username').textContent  = s.name;
+    document.getElementById('balance').textContent   = fmt(s.balance);
+    document.getElementById('equity').textContent    = fmt(s.equity);
+    document.getElementById('deposited').textContent = fmt(s.total_deposits);
+    document.getElementById('withdrawn').textContent = fmt(s.total_withdrawals);
+    document.getElementById('wdrBal').textContent    = fmt(s.balance);
+
+    const pendingWdr = parseFloat(s.pending_withdrawals || 0);
+    if(pendingWdr > 0){
+      document.getElementById('wdr-pending-label').textContent = '$'+fmt(pendingWdr)+' pending';
+      document.getElementById('wdr-pending-label').style.color = '#ffc800';
+      document.getElementById('wdrPendingAmt').textContent = fmt(pendingWdr);
+      document.getElementById('wdrPendingNotice').style.display = 'block';
+    }
+
+    const refBal = parseFloat(s.ref_balance||0);
+    document.getElementById('refBalance').textContent    = fmt(refBal);
+    document.getElementById('refCount').textContent      = s.ref_count||0;
+    document.getElementById('refStatCount').textContent  = s.ref_count||0;
+    document.getElementById('refStatEarned').textContent = '$'+fmt(s.ref_earned||0);
+    document.getElementById('refStatBal').textContent    = '$'+fmt(refBal);
+    document.getElementById('refWithdrawBal').textContent= fmt(refBal);
+
+    const code = s.ref_code||'';
+    const BASE_URL = 'https://www.sumitwealthfx.space';
+    const link = BASE_URL+'/register?ref='+code;
+    document.getElementById('refCode').textContent = code;
+    document.getElementById('refLink').textContent = link;
+
+    if(refBal>0){
+      const badge=document.getElementById('refBadge');
+      badge.textContent='$'+fmt(refBal);
+      badge.style.display='inline';
+    }
+
+    const depCount=txs.filter(t=>t.type==='DEPOSIT').length;
+    document.getElementById('dep-count').textContent=depCount+' transaction'+(depCount!==1?'s':'');
+
+    buildPriceChart();
+    buildPLChart(txs);
+    buildBalanceChart(s.balance, txs);
+    buildTxChart(txs);
+  }
+
+  // ── TAB SWITCHER ────────────────────────────────────────────────────────────
+  function switchTab(e,name){
+    document.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('show'));
+    document.querySelectorAll('.tab').forEach(el=>el.classList.remove('active'));
+    document.getElementById(name).classList.add('show');
+    e.currentTarget.classList.add('active');
+    if(name==='history')   loadHistory();
+    if(name==='trades')    loadClientTrades();
+    if(name==='referral')  loadReferralHistory();
+  }
+  function switchTabByName(name){
+    document.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('show'));
+    document.querySelectorAll('.tab').forEach(el=>el.classList.remove('active'));
+    document.getElementById(name).classList.add('show');
+    document.getElementById('refTab').classList.add('active');
+    loadReferralHistory();
+  }
+
+  // ── DEPOSIT ─────────────────────────────────────────────────────────────────
+  async function getDepositAddr(){
+    const amt = parseFloat(document.getElementById('depAmount').value||0);
+    const net = document.getElementById('depNetwork').value;
+    if(amt < 100){ showErr('depErr','Minimum deposit is $100'); return; }
+
+    const d = await api('/api/client/deposit/address?network='+net);
+    if(!d.success){ showErr('depErr', d.error); return; }
+
+    document.getElementById('depAddress').textContent  = d.data.address;
+    document.getElementById('netLabel').textContent    = net;
+    document.getElementById('depAmtLabel').textContent = amt.toFixed(2);
+    document.getElementById('depStep1').style.display  = 'none';
+    document.getElementById('depStep2').style.display  = 'block';
+
+    // Record pending deposit
+    await post('/api/client/deposit/pending',{amount:amt, network:net, address:d.data.address});
+  }
+
+  function resetDep(){
+    document.getElementById('depStep1').style.display = 'block';
+    document.getElementById('depStep2').style.display = 'none';
+    document.getElementById('depErr').classList.remove('show');
+  }
+
+  // ── WITHDRAW ────────────────────────────────────────────────────────────────
+  async function withdraw(){
+    const amt  = parseFloat(document.getElementById('wdrAmount').value||0);
+    const addr = document.getElementById('wdrAddr').value.trim();
+    const pin  = document.getElementById('wdrPin').value;
+    const net  = document.getElementById('wdrNetwork').value;
+    if(amt<1000)  {showErr('wdrErr','Min $1,000');return;}
+    if(!addr)     {showErr('wdrErr','Enter wallet address');return;}
+    if(!pin)      {showErr('wdrErr','Enter your PIN');return;}
+    const d=await post('/api/client/withdraw',{amount:amt,address:addr,pin,network:net});
+    if(!d.success){showErr('wdrErr',d.error);return;}
+    showSuccess('wdrOk', d.data.message+' Ref: '+d.data.reference);
+    document.getElementById('wdrAmount').value='';
+    document.getElementById('wdrPin').value='';
+    loadDash();
+  }
+
+  // ── REFERRAL WITHDRAW ───────────────────────────────────────────────────────
+  async function withdrawReferral(){
+    const addr = document.getElementById('refWdrAddr').value.trim();
+    const pin  = document.getElementById('refWdrPin').value;
+    const net  = document.getElementById('refWdrNetwork').value;
+    if(!addr){showErr('refWdrErr','Enter your USDT wallet address');return;}
+    if(!pin) {showErr('refWdrErr','Enter your PIN');return;}
+    const d=await post('/api/client/referral/withdraw',{address:addr,pin,network:net});
+    if(!d.success){showErr('refWdrErr',d.error);return;}
+    showSuccess('refWdrOk', d.data.message);
+    document.getElementById('refWdrAddr').value='';
+    document.getElementById('refWdrPin').value='';
+    loadDash();
+    loadReferralHistory();
+  }
+
+  // ── HISTORY ──────────────────────────────────────────────────────────────────
+  async function loadHistory(){
+    const d=await api('/api/client/transactions');
+    if(!d.data||!d.data.length){
+      document.getElementById('historyList').innerHTML='<p style="color:#aaa;padding:20px 0;">No transactions yet.</p>';
+      return;
+    }
+    let html='<table class="tbl"><thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Network</th><th>Status</th><th>Reference</th><th>Note</th></tr></thead><tbody>';
+    d.data.forEach(t=>{
+      const tc=t.type==='DEPOSIT'?'type-deposit':t.type.includes('REFERRAL')?'type-ref':'type-withdrawal';
+      const bc=t.status==='COMPLETED'?'badge-completed':(t.status==='PENDING'?'badge-pending':'badge-rejected');
+      const noteCell = t.note ? `<span style="color:#aaa;font-size:10px;">${t.note}</span>` : '—';
+      html+=`<tr>
+        <td style="color:#aaa;">${(t.created_at||'').substring(0,10)}</td>
+        <td class="${tc}">${t.type.replace(/_/g,' ')}</td>
+        <td style="font-weight:bold;">$${fmt(t.amount_usd)}</td>
+        <td style="color:#aaa;">${t.method||'—'}</td>
+        <td><span class="badge ${bc}">${t.status}</span></td>
+        <td style="color:#555;font-size:11px;">${t.reference||'—'}</td>
+        <td style="max-width:160px;">${noteCell}</td>
+      </tr>`;
+    });
+    html+='</tbody></table>';
+    document.getElementById('historyList').innerHTML=html;
+  }
+
+  // ── TRADES ───────────────────────────────────────────────────────────────────
+  async function loadClientTrades(){
+    document.getElementById('tradesList').innerHTML='<div style="color:#aaa; padding:20px 0;">Loading...</div>';
+    const d=await api('/api/client/trades');
+    const list=document.getElementById('tradesList');
+    if(!d.success||!d.data||!d.data.length){
+      list.innerHTML='<p style="color:#555; padding:20px 0;">No trades yet.</p>';
+      return;
+    }
+    let html='<table class="tbl"><thead><tr><th>Opened</th><th>Symbol</th><th>Direction</th><th>Entry Price</th><th>Close Price</th><th>Quantity</th><th>P&amp;L</th><th>Status</th><th>Close Reason</th></tr></thead><tbody>';
+    d.data.forEach(t=>{
+      const pnlColor=(t.pnl||0)>=0?'#00e090':'#ff4560';
+      const dirColor=t.direction==='BUY'?'#00e090':'#ff4560';
+      html+=`<tr>
+        <td style="color:#aaa;font-size:11px;">${(t.opened_at||'').substring(0,16).replace('T',' ')}</td>
+        <td style="color:#d4af37;font-weight:bold;">${t.symbol||'—'}</td>
+        <td style="color:${dirColor};font-weight:bold;">${t.direction||'—'}</td>
+        <td>$${fmt(t.entry_price)}</td>
+        <td>${t.close_price?'$'+fmt(t.close_price):'<span style="color:#555">Open</span>'}</td>
+        <td style="color:#aaa;">${fmt(t.quantity)}</td>
+        <td style="color:${pnlColor};font-weight:bold;">${t.pnl!=null?(t.pnl>=0?'+':'')+fmt(t.pnl):'—'}</td>
+        <td><span class="badge ${t.status==='OPEN'?'badge-open':'badge-closed'}">${t.status}</span></td>
+        <td style="color:#555;font-size:11px;">${t.close_reason||'—'}</td>
+      </tr>`;
+    });
+    html+='</tbody></table>';
+    list.innerHTML=html;
+  }
+
+  // ── REFERRAL HISTORY ─────────────────────────────────────────────────────────
+  async function loadReferralHistory(){
+    const d=await api('/api/client/referrals');
+    const list=document.getElementById('refHistoryList');
+    if(!d.success||!d.data||!d.data.length){
+      list.innerHTML='<p style="color:#555;padding:10px 0;">No referrals yet. Share your link to start earning!</p>';
+      return;
+    }
+    let html='<table class="tbl"><thead><tr><th>Date</th><th>Referred User</th><th>Commission</th><th>Status</th></tr></thead><tbody>';
+    d.data.forEach(r=>{
+      const bc=r.status==='CREDITED'?'badge-completed':'badge-pending';
+      html+=`<tr>
+        <td style="color:#aaa;">${(r.created_at||'').substring(0,10)}</td>
+        <td><div style="font-weight:bold;">${r.referred_name||'—'}</div>
+            <div style="font-size:10px;color:#555;">${r.referred_email||''}</div></td>
+        <td style="color:#00e090;font-weight:bold;">+$${fmt(r.commission_usd)}</td>
+        <td><span class="badge ${bc}">${r.status}</span></td>
+      </tr>`;
+    });
+    html+='</tbody></table>';
+    list.innerHTML=html;
+  }
+
+  // ── UTILS ────────────────────────────────────────────────────────────────────
+  function copyText(id){
+    const txt=document.getElementById(id).textContent;
+    navigator.clipboard.writeText(txt).then(()=>{
+      const btn=document.querySelector(`[onclick="copyText('${id}')"]`);
+      if(btn){const orig=btn.textContent;btn.textContent='✓ Copied!';setTimeout(()=>btn.textContent=orig,2000);}
+    });
+  }
+  function showErr(id,msg){
+    const el=document.getElementById(id);
+    el.textContent=msg; el.classList.add('show');
+    setTimeout(()=>el.classList.remove('show'),5000);
+  }
+  function showSuccess(id,msg){
+    const el=document.getElementById(id);
+    el.textContent=msg; el.classList.add('show');
+    setTimeout(()=>el.classList.remove('show'),6000);
+  }
+  async function logout(){
+    await post('/api/auth/logout',{});
+    window.location='/';
+  }
+
+  // ── INIT ─────────────────────────────────────────────────────────────────────
   loadDash();
 </script>
 </body>

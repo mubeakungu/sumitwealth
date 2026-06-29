@@ -306,13 +306,13 @@
         <!-- Step 1: Enter details -->
         <div id="mpesaStep1">
           <div class="alert alert-info show">
-            &#128241; You'll receive an M-Pesa prompt on your phone to confirm payment. Min: KES 500.
+            &#128241; You'll receive an M-Pesa prompt on your phone to confirm payment. Min: 100 dollars.
           </div>
           <div class="alert alert-error" id="mpesaErr"></div>
 
           <div class="form-group">
             <label>Amount (KES)</label>
-            <input type="number" id="mpesaAmount" placeholder="e.g. 13000" min="500"
+            <input type="number" id="mpesaAmount" placeholder="e.g. 13000" min="100 dollars"
               oninput="updateMpesaRate()">
           </div>
 
@@ -406,7 +406,7 @@
           <div class="steps-box" style="margin-top:16px;">
             <strong style="color:#d4af37;">Steps:</strong><br>
             1. Open Binance or your wallet<br>
-            2. Withdraw USDT &rarr; paste address &rarr; select <strong id="netLabel"></strong><br>
+            2. Deposit USDT &rarr; paste address &rarr; select <strong id="netLabel"></strong><br>
             3. Send exactly <strong id="depAmtLabel"></strong> USDT<br>
             4. Balance updates automatically after admin confirms
           </div>

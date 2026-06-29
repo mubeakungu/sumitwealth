@@ -1,11 +1,11 @@
 """
-Summit Wealth v5.7 - $8 PROFIT PER $100 BALANCE (8% daily)
+Summit Wealth v5.8 - $8 PROFIT PER $100 BALANCE (8% daily)
 - Scheduler starts at module level (works with gunicorn on Render)
 - One controlled trade per client per day
 - Trade profit scales: $8 per $100 of balance
 - Realistic trade using real Binance prices
 - Referral system: 16% commission
-- Manual wallet for deposits
+- Manual wallet for USDT deposits
 - Min deposit: $100
 - Withdrawal deducted only on admin approval
 - Database: PostgreSQL (psycopg2)
@@ -14,14 +14,16 @@ Summit Wealth v5.7 - $8 PROFIT PER $100 BALANCE (8% daily)
             referral withdrawal rejection now restores ref_balance
             admin clients list now includes total_deposits/withdrawals
 - FIX v5.6: referral withdrawal now requires referred user to have made a deposit
-- NEW v5.7: M-Pesa added as deposit payment method (number: 0757979633)
-            M-Pesa deposits capture KES amount sent + M-Pesa transaction code
-            stored in transaction note for admin verification
+- NEW v5.7: M-Pesa manual deposit method added
+- NEW v5.8: M-Pesa STK Push (Daraja API) — client enters phone + KES amount,
+            receives real M-Pesa PIN prompt on their phone,
+            callback auto-approves and credits account on success
 """
 
-import os, hashlib, secrets, datetime, uuid, logging, threading, random
+import os, hashlib, secrets, datetime, uuid, logging, threading, random, base64
 import psycopg2
 import psycopg2.extras
+import requests as http_requests
 from flask import Flask, request, jsonify, session, redirect, render_template
 from flask_cors import CORS
 from functools import wraps
@@ -77,7 +79,7 @@ TRADE_HOUR           = int(os.environ.get("TRADE_HOUR", "5"))
 TRADE_SYMBOL         = os.environ.get("TRADE_SYMBOL", "BTCUSDT")
 CHECK_INTERVAL       = 60
 
-# ── NEW v5.7: M-Pesa added ────────────────────────────────────────────────────
+# ── NETWORKS & WALLETS ────────────────────────────────────────────────────────
 NETWORKS = {
     "TRC20": {"network": "TRX"},
     "BEP20": {"network": "BSC"},
@@ -85,11 +87,26 @@ NETWORKS = {
     "MPESA": {"network": "MPESA"},
 }
 MANUAL_WALLETS = {
-    "TRC20":  os.environ.get("WALLET_TRC20", ""),
-    "BEP20":  os.environ.get("WALLET_BEP20", ""),
-    "ERC20":  os.environ.get("WALLET_ERC20", ""),
-    "MPESA":  os.environ.get("MPESA_NUMBER", "0757979633"),
+    "TRC20": os.environ.get("WALLET_TRC20", ""),
+    "BEP20": os.environ.get("WALLET_BEP20", ""),
+    "ERC20": os.environ.get("WALLET_ERC20", ""),
 }
+
+# ── DARAJA / M-PESA STK PUSH (v5.8) ──────────────────────────────────────────
+MPESA_ENV             = os.environ.get("MPESA_ENV", "sandbox")
+MPESA_CONSUMER_KEY    = os.environ.get("MPESA_CONSUMER_KEY", "")
+MPESA_CONSUMER_SECRET = os.environ.get("MPESA_CONSUMER_SECRET", "")
+MPESA_SHORTCODE       = os.environ.get("MPESA_SHORTCODE", "174379")
+MPESA_PASSKEY         = os.environ.get("MPESA_PASSKEY", "")
+MPESA_CALLBACK_URL    = os.environ.get("MPESA_CALLBACK_URL", "https://sumitwealthfx.space/mpesa/callback")
+
+# Exchange rate: KES per USD (update or make dynamic as needed)
+KES_PER_USD = float(os.environ.get("KES_PER_USD", "129.0"))
+
+if MPESA_ENV == "production":
+    MPESA_BASE_URL = "https://api.safaricom.co.ke"
+else:
+    MPESA_BASE_URL = "https://sandbox.safaricom.co.ke"
 
 REFERRAL_COMMISSION_PCT = 0.16
 REFERRAL_MIN_DEPOSIT    = 100.0
@@ -414,6 +431,83 @@ def process_referral_commission(tx_id, user_id, amount_usd):
     conn.close()
     log.info(f"Referral commission: {referrer['name']} +${commission}")
 
+# ── DARAJA STK PUSH ENGINE (v5.8) ────────────────────────────────────────────
+
+def mpesa_get_token():
+    """Get OAuth access token from Daraja."""
+    try:
+        creds = base64.b64encode(
+            f"{MPESA_CONSUMER_KEY}:{MPESA_CONSUMER_SECRET}".encode()
+        ).decode()
+        r = http_requests.get(
+            f"{MPESA_BASE_URL}/oauth/v1/generate?grant_type=client_credentials",
+            headers={"Authorization": f"Basic {creds}"},
+            timeout=15
+        )
+        r.raise_for_status()
+        return r.json().get("access_token")
+    except Exception as e:
+        log.error(f"M-Pesa token error: {e}")
+        return None
+
+def mpesa_format_phone(phone):
+    """Normalise phone to 2547XXXXXXXX format."""
+    phone = phone.strip().replace(" ", "").replace("-", "")
+    if phone.startswith("+"):
+        phone = phone[1:]
+    if phone.startswith("0"):
+        phone = "254" + phone[1:]
+    if not phone.startswith("254"):
+        phone = "254" + phone
+    return phone
+
+def mpesa_stk_push(phone, amount_kes, account_ref, description):
+    """
+    Initiate STK Push. Returns (True, checkout_request_id) or (False, error_msg).
+    amount_kes must be an integer (minimum 1).
+    """
+    token = mpesa_get_token()
+    if not token:
+        return False, "Could not connect to M-Pesa. Please try again."
+
+    timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+    password  = base64.b64encode(
+        f"{MPESA_SHORTCODE}{MPESA_PASSKEY}{timestamp}".encode()
+    ).decode()
+
+    payload = {
+        "BusinessShortCode": MPESA_SHORTCODE,
+        "Password":          password,
+        "Timestamp":         timestamp,
+        "TransactionType":   "CustomerPayBillOnline",
+        "Amount":            int(amount_kes),
+        "PartyA":            mpesa_format_phone(phone),
+        "PartyB":            MPESA_SHORTCODE,
+        "PhoneNumber":       mpesa_format_phone(phone),
+        "CallBackURL":       MPESA_CALLBACK_URL,
+        "AccountReference":  account_ref[:12],   # max 12 chars
+        "TransactionDesc":   description[:13],   # max 13 chars
+    }
+
+    try:
+        r = http_requests.post(
+            f"{MPESA_BASE_URL}/mpesa/stkpush/v1/processrequest",
+            json=payload,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=30
+        )
+        data = r.json()
+        log.info(f"STK Push response: {data}")
+
+        if data.get("ResponseCode") == "0":
+            return True, data.get("CheckoutRequestID", "")
+        else:
+            msg = data.get("errorMessage") or data.get("ResponseDescription") or "M-Pesa request failed"
+            return False, msg
+    except Exception as e:
+        log.error(f"STK Push error: {e}")
+        return False, "M-Pesa service unavailable. Please try again."
+
 # ── PAGE ROUTES ───────────────────────────────────────────────────────────────
 @app.route("/")
 def index(): return render_template("login.html")
@@ -591,6 +685,7 @@ def client_summary():
 
     return ok({
         "name":                u["name"],
+        "phone":               u["phone"] or "",
         "balance":             balance,
         "equity":              a["equity"]       if a else 0,
         "total_deposits":      dep["s"],
@@ -726,48 +821,185 @@ def client_profit_history():
 def client_deposit_address():
     net = request.args.get("network","TRC20").upper()
     if net not in NETWORKS: return err("Invalid network")
+    if net == "MPESA":
+        return ok({"network": "MPESA", "mode": "stk_push"})
     wallet = MANUAL_WALLETS.get(net,"")
     if not wallet: return err("Deposit address not configured. Contact support.")
-
-    # ── NEW v5.7: M-Pesa specific response ───────────────────────────────────
-    if net == "MPESA":
-        return ok({
-            "address":      wallet,
-            "network":      net,
-            "mode":         "manual",
-            "label":        "M-Pesa Number",
-            "instructions": (
-                f"Send to M-Pesa number {wallet}. "
-                "Use your full name as the reference. "
-                "Enter the exact KES amount you sent and your M-Pesa transaction code, "
-                "then submit — admin will confirm and credit your account in USD."
-            ),
-        })
-
     return ok({"address": wallet, "network": net, "mode": "manual"})
+
+
+@app.route("/api/client/mpesa/stk", methods=["POST"])
+@login_required
+def client_mpesa_stk():
+    """
+    Initiate M-Pesa STK Push.
+    Body: { phone: "0712345678", amount_usd: 100 }
+    Phone defaults to registered number if not provided.
+    Converts USD → KES using KES_PER_USD rate, sends STK push,
+    creates a PENDING transaction, returns the reference.
+    """
+    d         = request.json or {}
+    uid       = session["user_id"]
+    amount_usd = float(d.get("amount_usd", 0))
+
+    if amount_usd < 100:
+        return err("Minimum deposit is $100")
+
+    conn = get_db()
+    cur  = conn.cursor()
+
+    # Get user details
+    cur.execute("SELECT name, phone FROM users WHERE id=%s", (uid,))
+    u = cur.fetchone()
+    if not u:
+        cur.close(); conn.close()
+        return err("User not found")
+
+    # Phone: use submitted value or fall back to registered number
+    phone = d.get("phone","").strip() or (u["phone"] or "").strip()
+    if not phone:
+        cur.close(); conn.close()
+        return err("No phone number provided. Please enter your M-Pesa number.")
+
+    # Convert USD to KES (round up to whole shillings)
+    amount_kes = max(1, round(amount_usd * KES_PER_USD))
+
+    # Create pending transaction first so we have a reference
+    cur.execute("SELECT id FROM accounts WHERE user_id=%s", (uid,))
+    acct    = cur.fetchone()
+    tx_id   = _uid()
+    ref     = "SWC-" + secrets.token_hex(4).upper()
+    note    = f"STK Push | Phone: {mpesa_format_phone(phone)} | KES: {amount_kes}"
+
+    cur.execute(
+        "INSERT INTO transactions(id,user_id,account_id,type,method,amount_usd,"
+        "reference,status,note,deposit_address,created_at) "
+        "VALUES(%s,%s,%s,'DEPOSIT','MPESA',%s,%s,'PENDING',%s,%s,%s)",
+        (tx_id, uid, acct["id"] if acct else None,
+         amount_usd, ref, note, mpesa_format_phone(phone), _now())
+    )
+    conn.commit()
+
+    # Fire STK Push
+    ok_push, result = mpesa_stk_push(
+        phone      = phone,
+        amount_kes = amount_kes,
+        account_ref= ref,
+        description= "Summit Deposit"
+    )
+
+    if not ok_push:
+        # Mark transaction as rejected so it doesn't linger as pending
+        cur.execute(
+            "UPDATE transactions SET status='REJECTED', note=%s WHERE id=%s",
+            (f"STK Push failed: {result}", tx_id)
+        )
+        conn.commit()
+        cur.close(); conn.close()
+        return err(result)
+
+    # Store CheckoutRequestID in binance_tx_id column for callback matching
+    cur.execute(
+        "UPDATE transactions SET binance_tx_id=%s WHERE id=%s",
+        (result, tx_id)
+    )
+    conn.commit()
+    cur.close(); conn.close()
+
+    log.info(f"STK Push sent: {ref} | Phone: {phone} | KES: {amount_kes} | CheckoutID: {result}")
+    return ok({
+        "reference":          ref,
+        "checkout_request_id": result,
+        "amount_kes":         amount_kes,
+        "message":            f"M-Pesa prompt sent to {mpesa_format_phone(phone)}. Enter your PIN to complete."
+    })
+
+
+@app.route("/mpesa/callback", methods=["POST"])
+def mpesa_callback():
+    """
+    Daraja STK Push callback.
+    On success: mark transaction COMPLETED and credit account.
+    On failure: mark transaction REJECTED.
+    """
+    try:
+        data = request.json or {}
+        log.info(f"M-Pesa callback received: {data}")
+
+        body   = data.get("Body", {})
+        stk    = body.get("stkCallback", {})
+        result_code = stk.get("ResultCode")
+        checkout_id = stk.get("CheckoutRequestID","")
+
+        conn = get_db()
+        cur  = conn.cursor()
+        cur.execute(
+            "SELECT * FROM transactions WHERE binance_tx_id=%s AND type='DEPOSIT' AND status='PENDING'",
+            (checkout_id,)
+        )
+        tx = cur.fetchone()
+
+        if not tx:
+            log.warning(f"M-Pesa callback: no pending tx for CheckoutRequestID={checkout_id}")
+            cur.close(); conn.close()
+            return jsonify({"ResultCode": 0, "ResultDesc": "Accepted"})
+
+        if result_code == 0:
+            # Payment successful — credit account
+            meta      = stk.get("CallbackMetadata", {}).get("Item", [])
+            mpesa_ref = next((i["Value"] for i in meta if i.get("Name") == "MpesaReceiptNumber"), "")
+            phone_pay = next((i["Value"] for i in meta if i.get("Name") == "PhoneNumber"), "")
+
+            cur.execute(
+                "UPDATE transactions SET status='COMPLETED', completed_at=%s, "
+                "note=note||%s WHERE id=%s",
+                (_now(), f" | MpesaRef: {mpesa_ref}", tx["id"])
+            )
+            cur.execute(
+                "UPDATE accounts SET balance=balance+%s, equity=equity+%s WHERE user_id=%s",
+                (tx["amount_usd"], tx["amount_usd"], tx["user_id"])
+            )
+            conn.commit()
+            log.info(f"M-Pesa payment confirmed: {tx['reference']} +${tx['amount_usd']} | MpesaRef: {mpesa_ref}")
+
+            # Process referral commission
+            threading.Thread(
+                target=process_referral_commission,
+                args=(tx["id"], tx["user_id"], tx["amount_usd"]),
+                daemon=True
+            ).start()
+
+        else:
+            result_desc = stk.get("ResultDesc", "Cancelled or failed")
+            cur.execute(
+                "UPDATE transactions SET status='REJECTED', note=note||%s, completed_at=%s WHERE id=%s",
+                (f" | Failed: {result_desc}", _now(), tx["id"])
+            )
+            conn.commit()
+            log.info(f"M-Pesa payment failed: {tx['reference']} | {result_desc}")
+
+        cur.close(); conn.close()
+
+    except Exception as e:
+        log.error(f"M-Pesa callback error: {e}")
+
+    return jsonify({"ResultCode": 0, "ResultDesc": "Accepted"})
+
 
 @app.route("/api/client/deposit/pending", methods=["POST"])
 @login_required
 def client_deposit_pending():
-    d         = request.json or {}
-    uid       = session["user_id"]
-    amt       = float(d.get("amount", 0))
-    net       = d.get("network","TRC20").upper()
-    addr      = d.get("address","").strip()
-    # ── NEW v5.7: M-Pesa extra fields ────────────────────────────────────────
-    kes_amt   = d.get("kes_amount","").strip()
-    mpesa_ref = d.get("mpesa_ref","").strip()
+    """USDT manual deposit only — M-Pesa uses /api/client/mpesa/stk instead."""
+    d    = request.json or {}
+    uid  = session["user_id"]
+    amt  = float(d.get("amount", 0))
+    net  = d.get("network","TRC20").upper()
+    addr = d.get("address","").strip()
 
-    if amt < 100: return err("Minimum deposit is $100")
-    if not addr:  return err("Deposit address is required")
-
-    # Build note for admin — M-Pesa deposits include KES amount + transaction code
-    note = None
     if net == "MPESA":
-        parts = []
-        if kes_amt:   parts.append(f"KES sent: {kes_amt}")
-        if mpesa_ref: parts.append(f"M-Pesa ref: {mpesa_ref}")
-        note = " | ".join(parts) if parts else "M-Pesa deposit"
+        return err("Use the M-Pesa deposit flow")
+    if amt < 100:  return err("Minimum deposit is $100")
+    if not addr:   return err("Deposit address is required")
 
     conn = get_db()
     cur  = conn.cursor()
@@ -776,10 +1008,9 @@ def client_deposit_pending():
     ref  = "SWC-" + secrets.token_hex(4).upper()
     cur.execute(
         "INSERT INTO transactions(id,user_id,account_id,type,method,amount_usd,"
-        "reference,status,note,deposit_address,created_at) "
-        "VALUES(%s,%s,%s,'DEPOSIT',%s,%s,%s,'PENDING',%s,%s,%s)",
-        (_uid(), uid, acct["id"] if acct else None, net, amt, ref,
-         note, addr, _now())
+        "reference,status,deposit_address,created_at) "
+        "VALUES(%s,%s,%s,'DEPOSIT',%s,%s,%s,'PENDING',%s,%s)",
+        (_uid(), uid, acct["id"] if acct else None, net, amt, ref, addr, _now())
     )
     conn.commit()
     cur.close(); conn.close()
@@ -1163,7 +1394,7 @@ start_scheduler()
 
 if __name__ == "__main__":
     print("\n" + "="*60)
-    print("   Summit Wealth v5.7 — $8 PROFIT PER $100 BALANCE")
+    print("   Summit Wealth v5.8 — $8 PROFIT PER $100 BALANCE")
     print("="*60)
     print(f"   URL    : http://127.0.0.1:8080")
     print(f"   Client : john@test.com  / demo1234")
@@ -1172,7 +1403,8 @@ if __name__ == "__main__":
     print(f"   Symbol : {TRADE_SYMBOL}")
     print(f"   Min Dep: $100  |  Min Withdrawal: $1,000  |  Ref Withdrawal: $16")
     print(f"   Binance: {'CONNECTED ✓' if bnb else 'fallback prices'}")
-    print(f"   TRC20  : {'SET ✓' if MANUAL_WALLETS['TRC20'] else 'NOT SET ✗'}")
-    print(f"   M-Pesa : {MANUAL_WALLETS['MPESA']} ✓")
+    print(f"   TRC20  : {'SET ✓' if MANUAL_WALLETS.get('TRC20') else 'NOT SET ✗'}")
+    print(f"   M-Pesa : STK Push | Env: {MPESA_ENV} | Shortcode: {MPESA_SHORTCODE}")
+    print(f"   KES/USD: {KES_PER_USD} | Callback: {MPESA_CALLBACK_URL}")
     print("="*60 + "\n")
     app.run(debug=False, port=8080, host="0.0.0.0")

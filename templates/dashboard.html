@@ -36,7 +36,7 @@
     .chart-price-change { font-size:12px; margin-bottom:12px; }
     .coin-tabs { display:flex; gap:6px; margin-bottom:12px; }
     .coin-tab  { padding:4px 12px; font-size:11px; border-radius:20px; border:1px solid #333; background:transparent; color:#aaa; cursor:pointer; }
-    .coin-tab.active { background:#d4af37; color:#0a0e27; border-color:#d4af37; font-weight:bold; }
+    .coin-tab.active { background:#d4af37; color:#0a0e27; border-color:#d4af37; }
 
     .tabs { display:flex; gap:5px; margin-bottom:20px; flex-wrap:wrap; }
     .tab  { padding:10px 20px; background:#1a1f3a; border:1px solid #333; cursor:pointer; color:#aaa; border-radius:5px; font-size:13px; }
@@ -114,11 +114,45 @@
     .up   { color:#00e090; }
     .down { color:#ff4560; }
 
-    @media(max-width:900px) {
-      .stats { grid-template-columns:repeat(2,1fr); }
-      .charts-grid-top, .charts-grid-bottom { grid-template-columns:1fr; }
-      .ref-stats { grid-template-columns:1fr 1fr; }
+    /* ── NOTIFICATIONS ── */
+    .notif-wrap { position:relative; }
+    .notif-bell {
+      position:relative; width:36px; height:36px; display:flex; align-items:center; justify-content:center;
+      border:1px solid #2a2f4a; border-radius:8px; cursor:pointer; font-size:16px; background:#0f1428;
     }
+    .notif-bell:hover { border-color:#d4af37; }
+    .notif-badge {
+      position:absolute; top:-6px; right:-6px; background:#ff4560; color:#fff;
+      border-radius:20px; font-size:10px; font-weight:bold; padding:1px 5px; min-width:16px; text-align:center;
+      display:none; line-height:1.4; border:2px solid #1a1f3a;
+    }
+    .notif-dropdown {
+      position:absolute; top:46px; right:0; width:340px; max-height:440px; overflow-y:auto;
+      background:#151a33; border:1px solid #2a2f4a; border-radius:10px;
+      box-shadow:0 12px 32px rgba(0,0,0,0.55); display:none; z-index:1000;
+    }
+    .notif-dropdown.show { display:block; }
+    .notif-header {
+      display:flex; justify-content:space-between; align-items:center;
+      padding:12px 16px; border-bottom:1px solid #2a2f4a; position:sticky; top:0; background:#151a33;
+    }
+    .notif-header h4 { font-size:13px; color:#d4af37; letter-spacing:0.3px; }
+    .notif-mark-all { font-size:11px; color:#0088ff; cursor:pointer; background:none; border:none; }
+    .notif-mark-all:hover { text-decoration:underline; }
+    .notif-item { padding:14px 16px; border-bottom:1px solid #1e2440; cursor:pointer; }
+    .notif-item:last-child { border-bottom:none; }
+    .notif-item:hover { background:#1c2247; }
+    .notif-item.unread { background:rgba(212,175,55,0.05); border-left:3px solid #d4af37; }
+    .notif-item.unread.type-alert   { border-left-color:#ff4560; }
+    .notif-item.unread.type-warning { border-left-color:#ffa500; }
+    .notif-title { font-size:12.5px; font-weight:bold; color:#fff; margin-bottom:4px; display:flex; align-items:center; gap:6px; }
+    .notif-dot { width:6px; height:6px; border-radius:50%; background:#0088ff; flex-shrink:0; }
+    .notif-item.unread .notif-dot { background:#d4af37; }
+    .notif-item.type-alert .notif-dot   { background:#ff4560; }
+    .notif-item.type-warning .notif-dot { background:#ffa500; }
+    .notif-msg  { font-size:11.5px; color:#aaa; line-height:1.5; }
+    .notif-time { font-size:10px; color:#555; margin-top:6px; }
+    .notif-empty { padding:34px 16px; text-align:center; color:#555; font-size:12px; }
   </style>
 </head>
 <body>
@@ -126,6 +160,21 @@
 <div class="navbar">
   <div class="nav-brand">&#128176; SUMMIT WEALTH</div>
   <div class="nav-right">
+    <div class="notif-wrap">
+      <div class="notif-bell" onclick="toggleNotifDropdown(event)">
+        &#128276;
+        <span class="notif-badge" id="notifBadge">0</span>
+      </div>
+      <div class="notif-dropdown" id="notifDropdown">
+        <div class="notif-header">
+          <h4>NOTIFICATIONS</h4>
+          <button class="notif-mark-all" onclick="markAllNotifsRead(event)">Mark all read</button>
+        </div>
+        <div id="notifList">
+          <div class="notif-empty">Loading...</div>
+        </div>
+      </div>
+    </div>
     <span id="username" style="color:#aaa; font-size:13px;"></span>
     <button class="btn-red" onclick="logout()">Logout</button>
   </div>
@@ -403,6 +452,7 @@
   const api  = (url, opts={}) => fetch(url, {credentials:'same-origin', ...opts}).then(r=>r.json());
   const post = (u,b) => api(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
   const fmt  = n => parseFloat(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const esc  = s => (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
   Chart.defaults.color        = '#666';
   Chart.defaults.borderColor  = '#1e2440';
@@ -577,6 +627,84 @@
     buildTxChart(txs);
   }
 
+  // ── NOTIFICATIONS ────────────────────────────────────────────────────────────
+  function timeAgo(iso){
+    if(!iso) return '';
+    const d = new Date(iso+'Z');
+    const diffMs = Date.now() - d.getTime();
+    const mins = Math.floor(diffMs/60000);
+    if(mins < 1) return 'just now';
+    if(mins < 60) return mins+'m ago';
+    const hrs = Math.floor(mins/60);
+    if(hrs < 24) return hrs+'h ago';
+    const days = Math.floor(hrs/24);
+    if(days < 7) return days+'d ago';
+    return iso.substring(0,10);
+  }
+
+  function updateNotifBadge(count){
+    const b = document.getElementById('notifBadge');
+    if(count > 0){
+      b.textContent = count > 99 ? '99+' : count;
+      b.style.display = 'inline-block';
+    } else {
+      b.style.display = 'none';
+    }
+  }
+
+  function renderNotifications(list){
+    const el = document.getElementById('notifList');
+    if(!list || !list.length){
+      el.innerHTML = '<div class="notif-empty">No notifications yet.</div>';
+      return;
+    }
+    let html = '';
+    list.forEach(n=>{
+      const unreadClass = n.read_at ? '' : 'unread';
+      const typeClass = 'type-'+(n.type||'info').toLowerCase();
+      html += `<div class="notif-item ${unreadClass} ${typeClass}" onclick="onNotifClick('${n.id}', this)">
+        <div class="notif-title"><span class="notif-dot"></span>${esc(n.title)}</div>
+        <div class="notif-msg">${esc(n.message)}</div>
+        <div class="notif-time">${timeAgo(n.created_at)}</div>
+      </div>`;
+    });
+    el.innerHTML = html;
+  }
+
+  async function loadNotifications(){
+    const d = await api('/api/client/notifications');
+    if(!d.success) return;
+    renderNotifications(d.data.notifications);
+    updateNotifBadge(d.data.unread_count);
+  }
+
+  function toggleNotifDropdown(e){
+    e.stopPropagation();
+    const dd = document.getElementById('notifDropdown');
+    dd.classList.toggle('show');
+    if(dd.classList.contains('show')) loadNotifications();
+  }
+
+  document.addEventListener('click', (e)=>{
+    if(!e.target.closest('.notif-wrap')){
+      document.getElementById('notifDropdown').classList.remove('show');
+    }
+  });
+
+  async function onNotifClick(id, el){
+    if(el.classList.contains('unread')){
+      el.classList.remove('unread');
+      await post('/api/client/notifications/'+id+'/read', {});
+      loadNotifications();
+    }
+  }
+
+  async function markAllNotifsRead(e){
+    e.stopPropagation();
+    await post('/api/client/notifications/read-all', {});
+    loadNotifications();
+  }
+
   // ── TAB SWITCHER ────────────────────────────────────────────────────────────
   function switchTab(e,name){
     document.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('show'));
@@ -664,7 +792,7 @@
     d.data.forEach(t=>{
       const tc=t.type==='DEPOSIT'?'type-deposit':t.type.includes('REFERRAL')?'type-ref':'type-withdrawal';
       const bc=t.status==='COMPLETED'?'badge-completed':(t.status==='PENDING'?'badge-pending':'badge-rejected');
-      const noteCell = t.note ? `<span style="color:#aaa;font-size:10px;">${t.note}</span>` : '—';
+      const noteCell = t.note ? `<span style="color:#aaa;font-size:10px;">${esc(t.note)}</span>` : '—';
       html+=`<tr>
         <td style="color:#aaa;">${(t.created_at||'').substring(0,10)}</td>
         <td class="${tc}">${t.type.replace(/_/g,' ')}</td>
@@ -721,8 +849,8 @@
       const bc=r.status==='CREDITED'?'badge-completed':'badge-pending';
       html+=`<tr>
         <td style="color:#aaa;">${(r.created_at||'').substring(0,10)}</td>
-        <td><div style="font-weight:bold;">${r.referred_name||'—'}</div>
-            <div style="font-size:10px;color:#555;">${r.referred_email||''}</div></td>
+        <td><div style="font-weight:bold;">${esc(r.referred_name)||'—'}</div>
+            <div style="font-size:10px;color:#555;">${esc(r.referred_email)||''}</div></td>
         <td style="color:#00e090;font-weight:bold;">+$${fmt(r.commission_usd)}</td>
         <td><span class="badge ${bc}">${r.status}</span></td>
       </tr>`;
@@ -756,6 +884,8 @@
 
   // ── INIT ─────────────────────────────────────────────────────────────────────
   loadDash();
+  loadNotifications();
+  setInterval(loadNotifications, 30000); // poll every 30s for new notifications
 </script>
 </body>
 </html>

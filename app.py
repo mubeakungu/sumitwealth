@@ -41,6 +41,15 @@ Summit Wealth v5.10 - $8 PROFIT PER $100 BALANCE (8% daily)
             stays constant unless the client deposits more or withdraws
             principal. Referral withdrawals are NOT counted against net
             deposit (they only ever draw from ref_balance, never principal).
+- NEW v5.12: Free-tier Render has no shell access, so the balance-correction
+            migration (compounded → flat 8%/100 net deposit) now runs
+            in-process via a protected admin endpoint instead of a standalone
+            script: POST /api/admin/migrate/flat-profit (dry run by default,
+            {"apply": true} to commit). Added a notifications table + client
+            endpoints so affected clients see an in-platform message
+            explaining any balance correction — the migration endpoint
+            auto-creates one for every client whose balance changes. Also
+            added a general-purpose admin broadcast/direct-message endpoint.
 """
 
 import os, hashlib, secrets, datetime, uuid, logging, threading, random, base64
@@ -213,6 +222,15 @@ CREATE TABLE IF NOT EXISTS daily_trade_log (
     date       TEXT,
     created_at TEXT
 );
+CREATE TABLE IF NOT EXISTS notifications (
+    id         TEXT PRIMARY KEY,
+    user_id    TEXT,
+    title      TEXT,
+    message    TEXT,
+    type       TEXT DEFAULT 'INFO',
+    read_at    TEXT,
+    created_at TEXT
+);
 """)
     conn.commit()
 
@@ -302,6 +320,14 @@ def _hash(s):  return hashlib.sha256(str(s).encode()).hexdigest()
 def _uid():    return str(uuid.uuid4())
 def _now():    return datetime.datetime.utcnow().isoformat()
 def _today():  return datetime.datetime.utcnow().strftime("%Y-%m-%d")
+
+def create_notification(cur, user_id, title, message, ntype="INFO"):
+    """Insert a notification row. Caller is responsible for conn.commit()."""
+    cur.execute(
+        "INSERT INTO notifications(id,user_id,title,message,type,created_at) "
+        "VALUES(%s,%s,%s,%s,%s,%s)",
+        (_uid(), user_id, title, message, ntype, _now())
+    )
 
 def ok(data=None, **kw):
     p = {"success": True}
@@ -919,6 +945,54 @@ def client_profit_history():
     cur.close(); conn.close()
     return ok([dict(r) for r in rows])
 
+# ── NOTIFICATIONS (v5.12) ─────────────────────────────────────────────────────
+@app.route("/api/client/notifications")
+@login_required
+def client_notifications():
+    uid  = session["user_id"]
+    conn = get_db()
+    cur  = conn.cursor()
+    cur.execute(
+        "SELECT * FROM notifications WHERE user_id=%s ORDER BY created_at DESC LIMIT 50",
+        (uid,)
+    )
+    rows = cur.fetchall()
+    cur.execute(
+        "SELECT COUNT(*) AS c FROM notifications WHERE user_id=%s AND read_at IS NULL",
+        (uid,)
+    )
+    unread = cur.fetchone()["c"]
+    cur.close(); conn.close()
+    return ok({"notifications": [dict(r) for r in rows], "unread_count": unread})
+
+@app.route("/api/client/notifications/<nid>/read", methods=["POST"])
+@login_required
+def client_notification_read(nid):
+    uid  = session["user_id"]
+    conn = get_db()
+    cur  = conn.cursor()
+    cur.execute(
+        "UPDATE notifications SET read_at=%s WHERE id=%s AND user_id=%s AND read_at IS NULL",
+        (_now(), nid, uid)
+    )
+    conn.commit()
+    cur.close(); conn.close()
+    return ok()
+
+@app.route("/api/client/notifications/read-all", methods=["POST"])
+@login_required
+def client_notifications_read_all():
+    uid  = session["user_id"]
+    conn = get_db()
+    cur  = conn.cursor()
+    cur.execute(
+        "UPDATE notifications SET read_at=%s WHERE user_id=%s AND read_at IS NULL",
+        (_now(), uid)
+    )
+    conn.commit()
+    cur.close(); conn.close()
+    return ok()
+
 # ── DEPOSIT ───────────────────────────────────────────────────────────────────
 @app.route("/api/client/deposit/address")
 @login_required
@@ -1505,6 +1579,156 @@ def admin_trades():
     cur.close(); conn.close()
     return ok([dict(t) for t in trades])
 
+@app.route("/api/admin/migrate/flat-profit", methods=["POST"])
+@admin_required
+def admin_migrate_flat_profit():
+    """
+    ONE-OFF MIGRATION (v5.12) — runs in-process since free-tier Render has
+    no shell access. Corrects balances that were paid under the OLD
+    compounding formula (balance/100*8 daily) to match the NEW flat formula
+    (net_deposit/100*8, same amount every day).
+
+    Body: { "apply": false }  (default) -> dry run, computes and returns
+                                            deltas, writes NOTHING to the DB
+          { "apply": true }             -> commits the corrections:
+                                            - adjusts accounts.balance/equity
+                                            - logs a visible ADJUSTMENT/MIGRATION
+                                              transaction per affected client
+                                            - rewrites daily_trade_log.profit
+                                              rows to the flat amount
+                                            - creates an in-platform
+                                              notification for every client
+                                              whose balance changed
+    Always call with apply=false first and review the response before
+    calling again with apply=true.
+    """
+    d     = request.json or {}
+    apply = bool(d.get("apply", False))
+
+    conn = get_db()
+    cur  = conn.cursor()
+
+    cur.execute(
+        "SELECT u.id, u.name, u.email, a.id AS account_id, a.balance, a.equity "
+        "FROM users u JOIN accounts a ON u.id = a.user_id "
+        "WHERE u.role = 'client' ORDER BY u.created_at"
+    )
+    clients = cur.fetchall()
+
+    results      = []
+    total_delta  = 0.0
+
+    for c in clients:
+        uid = c["id"]
+
+        cur.execute(
+            "SELECT COALESCE(SUM(amount_usd),0) AS s FROM transactions "
+            "WHERE user_id=%s AND type='DEPOSIT' AND status='COMPLETED'", (uid,)
+        )
+        deposits = cur.fetchone()["s"]
+
+        cur.execute(
+            "SELECT COALESCE(SUM(amount_usd),0) AS s FROM transactions "
+            "WHERE user_id=%s AND type='WITHDRAWAL' AND status='COMPLETED'", (uid,)
+        )
+        principal_withdrawals = cur.fetchone()["s"]
+
+        net_deposit = round(deposits - principal_withdrawals, 2)
+
+        cur.execute(
+            "SELECT id, profit FROM daily_trade_log WHERE user_id=%s ORDER BY date", (uid,)
+        )
+        trade_log_rows    = cur.fetchall()
+        days_traded        = len(trade_log_rows)
+        old_total_profit   = round(sum(r["profit"] for r in trade_log_rows), 2)
+
+        # Flag clients with more than one deposit/withdrawal event — net
+        # deposit may not have been constant across their whole history, so
+        # the correction nets out the *total* correctly but isn't a perfect
+        # day-by-day reconstruction. Worth a manual look for these.
+        cur.execute(
+            "SELECT COUNT(*) AS c FROM transactions "
+            "WHERE user_id=%s AND type IN ('DEPOSIT','WITHDRAWAL') AND status='COMPLETED'", (uid,)
+        )
+        mixed_history = cur.fetchone()["c"] > 1
+
+        if net_deposit < MIN_BALANCE or days_traded == 0:
+            flat_daily = 0.0
+        else:
+            flat_daily = round((net_deposit / 100.0) * DAILY_PROFIT_PER_100, 2)
+
+        correct_total_profit = round(flat_daily * days_traded, 2)
+        delta = round(correct_total_profit - old_total_profit, 2)
+
+        entry = {
+            "user_id": uid, "name": c["name"], "email": c["email"],
+            "net_deposit": net_deposit, "days_traded": days_traded,
+            "old_total_profit": old_total_profit,
+            "correct_total_profit": correct_total_profit,
+            "delta": delta, "mixed_history": mixed_history,
+        }
+        results.append(entry)
+
+        if abs(delta) < 0.01:
+            continue
+        total_delta += delta
+
+        if apply:
+            try:
+                cur.execute(
+                    "UPDATE accounts SET balance = balance + %s, equity = equity + %s "
+                    "WHERE user_id = %s",
+                    (delta, delta, uid)
+                )
+                note = (
+                    "Balance correction: migrated to flat $8 per $100 net-deposit "
+                    "profit basis (previously compounded daily)."
+                )
+                cur.execute(
+                    "INSERT INTO transactions(id,user_id,account_id,type,method,amount_usd,"
+                    "reference,status,note,created_at,completed_at) "
+                    "VALUES(%s,%s,%s,'ADJUSTMENT','MIGRATION',%s,%s,'COMPLETED',%s,%s,%s)",
+                    (_uid(), uid, c["account_id"], abs(delta),
+                     "MIG-" + secrets.token_hex(4).upper(), note, _now(), _now())
+                )
+                for row in trade_log_rows:
+                    cur.execute(
+                        "UPDATE daily_trade_log SET profit=%s WHERE id=%s",
+                        (flat_daily, row["id"])
+                    )
+
+                direction = "reduced" if delta < 0 else "increased"
+                notif_msg = (
+                    f"We've updated how daily profit is calculated: it's now a flat "
+                    f"${DAILY_PROFIT_PER_100:.0f} per $100 you've deposited each day, "
+                    f"instead of compounding on your growing balance. As part of this "
+                    f"change your balance has been {direction} by ${abs(delta):,.2f} "
+                    f"to reflect the corrected amount. Your new balance is "
+                    f"${c['balance'] + delta:,.2f}. See your Transactions tab for the "
+                    f"full adjustment record."
+                )
+                create_notification(
+                    cur, uid,
+                    "Account balance updated — profit calculation correction",
+                    notif_msg,
+                    "ALERT" if delta < 0 else "INFO"
+                )
+                conn.commit()
+                entry["applied"] = True
+            except Exception as e:
+                conn.rollback()
+                entry["applied"] = False
+                entry["error"] = str(e)
+
+    cur.close(); conn.close()
+
+    return ok({
+        "mode": "APPLIED" if apply else "DRY_RUN",
+        "clients_needing_correction": len([r for r in results if abs(r["delta"]) >= 0.01]),
+        "total_delta": round(total_delta, 2),
+        "results": results,
+    })
+
 @app.route("/api/admin/referrals")
 @admin_required
 def admin_referrals():
@@ -1519,6 +1743,48 @@ def admin_referrals():
     refs = cur.fetchall()
     cur.close(); conn.close()
     return ok([dict(r) for r in refs])
+
+# ── ADMIN NOTIFICATIONS (v5.12) ───────────────────────────────────────────────
+@app.route("/api/admin/notifications/send", methods=["POST"])
+@admin_required
+def admin_send_notification():
+    """
+    Send a notification either to one client or broadcast to all clients.
+    Body: { "user_id": "<id>" }  -> single client
+          { "broadcast": true }  -> every client
+          "title": str, "message": str, "type": "INFO"|"WARNING"|"ALERT" (optional)
+    """
+    d       = request.json or {}
+    title   = d.get("title","").strip()
+    message = d.get("message","").strip()
+    ntype   = d.get("type","INFO").upper()
+    user_id = d.get("user_id","").strip()
+    broadcast = bool(d.get("broadcast", False))
+
+    if not title or not message:
+        return err("title and message are required")
+    if not broadcast and not user_id:
+        return err("Provide either user_id or broadcast=true")
+
+    conn = get_db()
+    cur  = conn.cursor()
+
+    if broadcast:
+        cur.execute("SELECT id FROM users WHERE role='client'")
+        targets = [r["id"] for r in cur.fetchall()]
+    else:
+        cur.execute("SELECT id FROM users WHERE id=%s AND role='client'", (user_id,))
+        row = cur.fetchone()
+        if not row:
+            cur.close(); conn.close()
+            return err("Client not found", 404)
+        targets = [row["id"]]
+
+    for uid in targets:
+        create_notification(cur, uid, title, message, ntype)
+    conn.commit()
+    cur.close(); conn.close()
+    return ok({"message": f"Notification sent to {len(targets)} client(s)"})
 
 @app.route("/api/admin/scheduler/status")
 @admin_required

@@ -1,5 +1,5 @@
 """
-Summit Wealth v5.9 - $8 PROFIT PER $100 BALANCE (8% daily)
+Summit Wealth v5.10 - $8 PROFIT PER $100 BALANCE (8% daily)
 - Scheduler starts at module level (works with gunicorn on Render)
 - One controlled trade per client per day
 - Trade profit scales: $8 per $100 of balance
@@ -20,6 +20,16 @@ Summit Wealth v5.9 - $8 PROFIT PER $100 BALANCE (8% daily)
             callback auto-approves and credits account on success
 - FIX v5.9: STK Push route renamed to /api/client/mpesa/stk-push (dashboard match)
             Added /api/client/mpesa/status polling endpoint
+- FIX v5.10: CRITICAL — fixed double/triple daily-profit crediting caused by
+            multiple gunicorn workers each running their own scheduler thread
+            (and/or repeated manual "Run Trades" clicks) racing on a
+            SELECT-then-INSERT check. daily_trade_log now has a UNIQUE
+            (user_id, date) constraint and the "already traded today" check
+            is now a single atomic INSERT ... ON CONFLICT DO NOTHING. Only
+            the worker that successfully claims the slot credits the
+            balance — every other concurrent attempt is a guaranteed no-op.
+            Added a process-local lock so manual admin trade-runs can't
+            overlap a scheduled run either.
 """
 
 import os, hashlib, secrets, datetime, uuid, logging, threading, random, base64
@@ -207,6 +217,34 @@ CREATE TABLE IF NOT EXISTS daily_trade_log (
 
     conn.commit()
 
+    # ── FIX v5.10: enforce one daily_trade_log row per (user_id, date) ──────
+    # This is what actually stops double-crediting. Without this constraint,
+    # two concurrent workers (or two manual "Run Trades" clicks) can both
+    # pass the old SELECT check before either INSERT lands, and both credit
+    # the account. First, deduplicate any existing double-paid rows, then
+    # add the constraint so it can never happen again.
+    try:
+        cur.execute("""
+            DELETE FROM daily_trade_log a USING daily_trade_log b
+            WHERE a.id > b.id
+              AND a.user_id = b.user_id
+              AND a.date = b.date
+        """)
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        log.warning(f"daily_trade_log dedupe skipped: {e}")
+
+    try:
+        cur.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_trade_log_user_date
+            ON daily_trade_log(user_id, date)
+        """)
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        log.warning(f"daily_trade_log unique index skipped: {e}")
+
     cur.execute("SELECT id FROM users WHERE referral_code IS NULL OR referral_code=''")
     users = cur.fetchall()
     for u in users:
@@ -293,76 +331,99 @@ def get_live_price(symbol):
     log.info(f"Using fallback price {symbol}: ${price:,.2f}")
     return price
 
+# FIX v5.10: process-local lock so a manual admin trade-run can't overlap
+# a concurrently firing scheduled run within the SAME worker process.
+_trade_run_lock = threading.Lock()
+
 def run_daily_trades():
-    today = _today()
-    log.info(f"=== Daily trade run: {today} — ${DAILY_PROFIT_PER_100} profit per $100 balance ===")
-
-    price       = get_live_price(TRADE_SYMBOL)
-    pct_gain    = random.uniform(0.003, 0.005)
-    close_price = round(price * (1 + pct_gain), 2)
-    price_diff  = close_price - price
-
-    if price_diff <= 0:
-        log.error("Price diff is zero — aborting.")
+    if not _trade_run_lock.acquire(blocking=False):
+        log.warning("run_daily_trades already in progress on this worker — skipping overlapping call")
         return
 
-    log.info(f"  Entry: ${price:,.2f} | Close: ${close_price:,.2f} | Rate: ${DAILY_PROFIT_PER_100}/$100")
+    try:
+        today = _today()
+        log.info(f"=== Daily trade run: {today} — ${DAILY_PROFIT_PER_100} profit per $100 balance ===")
 
-    conn = get_db()
-    cur  = conn.cursor()
-    cur.execute(
-        "SELECT u.id, u.name, a.id AS account_id, a.balance "
-        "FROM users u JOIN accounts a ON u.id=a.user_id "
-        "WHERE u.role='client' AND a.balance >= %s",
-        (MIN_BALANCE,)
-    )
-    clients = cur.fetchall()
-    log.info(f"  Eligible clients: {len(clients)}")
-    paid = 0
+        price       = get_live_price(TRADE_SYMBOL)
+        pct_gain    = random.uniform(0.003, 0.005)
+        close_price = round(price * (1 + pct_gain), 2)
+        price_diff  = close_price - price
 
-    for c in clients:
-        cur.execute("SELECT id FROM daily_trade_log WHERE user_id=%s AND date=%s",
-                    (c["id"], today))
-        if cur.fetchone():
-            log.info(f"  Skipping {c['name']} — already traded today")
-            continue
+        if price_diff <= 0:
+            log.error("Price diff is zero — aborting.")
+            return
 
-        client_profit   = round((c["balance"] / 100.0) * DAILY_PROFIT_PER_100, 2)
-        client_quantity = round(client_profit / price_diff, 6)
+        log.info(f"  Entry: ${price:,.2f} | Close: ${close_price:,.2f} | Rate: ${DAILY_PROFIT_PER_100}/$100")
 
-        now              = datetime.datetime.utcnow()
-        open_minutes_ago = random.randint(30, 90)
-        opened_at        = (now - datetime.timedelta(minutes=open_minutes_ago)).isoformat()
-        closed_at        = now.isoformat()
-        trade_id         = _uid()
-        sl               = round(price * 0.985, 2)
-        tp               = close_price
-
+        conn = get_db()
+        cur  = conn.cursor()
         cur.execute(
-            "INSERT INTO trades(id,user_id,account_id,symbol,direction,"
-            "entry_price,quantity,stop_loss,take_profit,close_price,"
-            "pnl,status,close_reason,opened_at,closed_at) "
-            "VALUES(%s,%s,%s,%s,'BUY',%s,%s,%s,%s,%s,%s,'CLOSED','TAKE_PROFIT',%s,%s)",
-            (trade_id, c["id"], c["account_id"],
-             TRADE_SYMBOL, price, client_quantity, sl, tp,
-             close_price, client_profit, opened_at, closed_at)
+            "SELECT u.id, u.name, a.id AS account_id, a.balance "
+            "FROM users u JOIN accounts a ON u.id=a.user_id "
+            "WHERE u.role='client' AND a.balance >= %s",
+            (MIN_BALANCE,)
         )
-        cur.execute(
-            "UPDATE accounts SET balance=balance+%s, equity=equity+%s WHERE user_id=%s",
-            (client_profit, client_profit, c["id"])
-        )
-        cur.execute(
-            "INSERT INTO daily_trade_log(id,user_id,account_id,trade_id,"
-            "profit,date,created_at) VALUES(%s,%s,%s,%s,%s,%s,%s)",
-            (_uid(), c["id"], c["account_id"], trade_id, client_profit, today, _now())
-        )
-        paid += 1
-        log.info(f"  ✓ {c['name']}: +${client_profit} (bal: ${c['balance']:,.2f})")
+        clients = cur.fetchall()
+        log.info(f"  Eligible clients: {len(clients)}")
+        paid = 0
 
-    conn.commit()
-    cur.close()
-    conn.close()
-    log.info(f"=== Done: {paid}/{len(clients)} clients credited ===")
+        for c in clients:
+            client_profit   = round((c["balance"] / 100.0) * DAILY_PROFIT_PER_100, 2)
+            client_quantity = round(client_profit / price_diff, 6)
+
+            now              = datetime.datetime.utcnow()
+            open_minutes_ago = random.randint(30, 90)
+            opened_at        = (now - datetime.timedelta(minutes=open_minutes_ago)).isoformat()
+            closed_at        = now.isoformat()
+            trade_id         = _uid()
+            sl               = round(price * 0.985, 2)
+            tp               = close_price
+
+            try:
+                # ── FIX v5.10: atomic claim ──────────────────────────────
+                # This single INSERT is the ONLY thing that decides whether
+                # this client gets paid today. If another worker/thread has
+                # already inserted a row for (user_id, date), the unique
+                # index makes this a guaranteed no-op (rowcount 0) instead
+                # of a duplicate payout. No SELECT-then-INSERT race window.
+                cur.execute(
+                    "INSERT INTO daily_trade_log(id,user_id,account_id,trade_id,"
+                    "profit,date,created_at) VALUES(%s,%s,%s,%s,%s,%s,%s) "
+                    "ON CONFLICT (user_id, date) DO NOTHING",
+                    (_uid(), c["id"], c["account_id"], trade_id, client_profit, today, _now())
+                )
+
+                if cur.rowcount == 0:
+                    conn.commit()
+                    log.info(f"  Skipping {c['name']} — already traded today")
+                    continue
+
+                cur.execute(
+                    "INSERT INTO trades(id,user_id,account_id,symbol,direction,"
+                    "entry_price,quantity,stop_loss,take_profit,close_price,"
+                    "pnl,status,close_reason,opened_at,closed_at) "
+                    "VALUES(%s,%s,%s,%s,'BUY',%s,%s,%s,%s,%s,%s,'CLOSED','TAKE_PROFIT',%s,%s)",
+                    (trade_id, c["id"], c["account_id"],
+                     TRADE_SYMBOL, price, client_quantity, sl, tp,
+                     close_price, client_profit, opened_at, closed_at)
+                )
+                cur.execute(
+                    "UPDATE accounts SET balance=balance+%s, equity=equity+%s WHERE user_id=%s",
+                    (client_profit, client_profit, c["id"])
+                )
+                conn.commit()
+                paid += 1
+                log.info(f"  ✓ {c['name']}: +${client_profit} (bal: ${c['balance']:,.2f})")
+
+            except Exception as e:
+                conn.rollback()
+                log.error(f"  Trade failed for {c['name']}: {e}")
+
+        cur.close()
+        conn.close()
+        log.info(f"=== Done: {paid}/{len(clients)} clients credited ===")
+    finally:
+        _trade_run_lock.release()
 
 # ── SCHEDULER ─────────────────────────────────────────────────────────────────
 _scheduler_lock    = threading.Lock()
@@ -1445,7 +1506,7 @@ start_scheduler()
 
 if __name__ == "__main__":
     print("\n" + "="*60)
-    print("   Summit Wealth v5.9 — $8 PROFIT PER $100 BALANCE")
+    print("   Summit Wealth v5.10 — $8 PROFIT PER $100 BALANCE")
     print("="*60)
     print(f"   URL    : http://127.0.0.1:8080")
     print(f"   Client : john@test.com  / demo1234")

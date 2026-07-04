@@ -52,6 +52,15 @@
       display: none;
     }
     a { color: #d4af37; text-decoration: none; }
+    .forgot-link {
+      display: block;
+      text-align: right;
+      font-size: 11px;
+      margin-top: -8px;
+      margin-bottom: 18px;
+    }
+    .forgot-link a { color: #888; }
+    .forgot-link a:hover { color: #d4af37; }
   </style>
 </head>
 <body>
@@ -66,12 +75,12 @@
       <label>Password</label>
       <input type="password" id="pass" placeholder="demo1234">
     </div>
+    <a href="/forgot-password" class="forgot-link">Forgot password?</a>
     <button class="btn" onclick="login()">Sign In</button>
     <p style="margin-top: 15px; text-align: center; font-size: 12px;">
       <a href="/register">Create an account</a> &nbsp;|&nbsp; <a href="/admin">Admin Login</a>
     </p>
   </div>
-
   <script>
     async function login() {
       const r = await fetch('/api/auth/login', {

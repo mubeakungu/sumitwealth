@@ -465,7 +465,7 @@
       <div class="alert alert-error"   id="resetPwErr"></div>
       <div class="alert alert-success" id="resetPwOk"></div>
       <div class="modal-btns">
-        <button class="btn btn-red" style="width:100%;" onclick="resetClientPassword()">
+        <button class="btn btn-red" style="width:100%;" onclick="resetClientPassword()" id="resetPwBtn">
           &#128273; Reset Password
         </button>
       </div>
@@ -985,6 +985,14 @@ function openEditClientModal(uid) {
   document.getElementById('editClientPhone').value = c.phone || '';
   document.getElementById('editClientErr').classList.remove('show');
   document.getElementById('editClientOk').classList.remove('show');
+
+  // Reset the password sub-section state every time the modal opens,
+  // so a stale value/message from a previously-edited client never lingers.
+  document.getElementById('resetPwNew').value = '';
+  document.getElementById('resetPwNotify').checked = true;
+  document.getElementById('resetPwErr').classList.remove('show');
+  document.getElementById('resetPwOk').classList.remove('show');
+
   document.getElementById('editClientModal').classList.add('show');
 }
 
@@ -1012,6 +1020,50 @@ async function saveClientEdit() {
     closeModal('editClientModal');
     await refreshData();
   }, 1500);
+}
+
+// ── RESET CLIENT PASSWORD (previously missing — now wired to the backend) ───
+async function resetClientPassword() {
+  const uid    = document.getElementById('editClientId').value;
+  const newPw  = document.getElementById('resetPwNew').value;
+  const notify = document.getElementById('resetPwNotify').checked;
+  const btn    = document.getElementById('resetPwBtn');
+
+  document.getElementById('resetPwErr').classList.remove('show');
+  document.getElementById('resetPwOk').classList.remove('show');
+
+  if (!uid) {
+    showError('No client selected', 'resetPwErr');
+    return;
+  }
+  if (!newPw || newPw.length < 6) {
+    showError('Password must be at least 6 characters', 'resetPwErr');
+    return;
+  }
+
+  btn.disabled = true;
+  const originalLabel = btn.innerHTML;
+  btn.innerHTML = 'Resetting...';
+
+  try {
+    const d = await post(`/api/admin/client/${uid}/reset-password`, {
+      new_password: newPw,
+      notify: notify
+    });
+
+    if (!d.success) {
+      showError(d.error || 'Reset failed', 'resetPwErr');
+      return;
+    }
+
+    showSuccess(d.data.message, 'resetPwOk');
+    document.getElementById('resetPwNew').value = '';
+  } catch (e) {
+    showError('Network error — please try again', 'resetPwErr');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = originalLabel;
+  }
 }
 
 // ── MODALS ────────────────────────────────────────────────────────────────────

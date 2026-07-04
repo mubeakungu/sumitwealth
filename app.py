@@ -1,5 +1,5 @@
 """
-Summit Wealth v5.10 - $8 PROFIT PER $100 BALANCE (8% daily)
+Summit Wealth v5.13 - $8 PROFIT PER $100 BALANCE (8% daily)
 - Scheduler starts at module level (works with gunicorn on Render)
 - One controlled trade per client per day
 - Trade profit scales: $8 per $100 of balance
@@ -50,6 +50,16 @@ Summit Wealth v5.10 - $8 PROFIT PER $100 BALANCE (8% daily)
             explaining any balance correction — the migration endpoint
             auto-creates one for every client whose balance changes. Also
             added a general-purpose admin broadcast/direct-message endpoint.
+- NEW v5.13: Password recovery added.
+            - /forgot-password page + POST /api/auth/forgot-password:
+              self-service reset for clients. No SMTP is configured for
+              Summit Wealth, so identity is verified with email + the
+              client's registered phone + their 6-digit PIN (the same PIN
+              already used for withdrawals) instead of an email link.
+            - POST /api/admin/client/<uid>/reset-password: lets an admin
+              set a new password directly for any client from the admin
+              dashboard's client-edit view, with an optional in-platform
+              notification (reuses the existing notifications table).
 """
 
 import os, hashlib, secrets, datetime, uuid, logging, threading, random, base64
@@ -626,6 +636,10 @@ def index(): return render_template("login.html")
 @app.route("/register")
 def register_page(): return render_template("register.html")
 
+@app.route("/forgot-password")
+def forgot_password_page():
+    return render_template("forgot_password.html")
+
 @app.route("/dashboard")
 def dashboard():
     if "user_id" not in session or session.get("role") != "client":
@@ -720,6 +734,60 @@ def api_login():
 def api_logout():
     session.clear()
     return ok()
+
+# ── AUTH: FORGOT PASSWORD (v5.13) ─────────────────────────────────────────────
+@app.route("/api/auth/forgot-password", methods=["POST"])
+def api_forgot_password():
+    """
+    Self-service password reset for clients.
+
+    There's no SMTP configured for Summit Wealth (unlike Zappest), so
+    instead of an emailed reset link, identity is verified using three
+    things the client already has on file:
+        - their account email
+        - their registered phone number
+        - their 6-digit PIN (the same PIN used for withdrawals)
+    All three must match before the password is changed. Admin accounts
+    are excluded — admins are reset by another admin via the admin panel.
+
+    Body: { email, phone, pin, new_password }
+    """
+    d            = request.json or {}
+    email        = d.get("email","").lower().strip()
+    phone        = d.get("phone","").strip()
+    pin          = d.get("pin","").strip()
+    new_password = d.get("new_password","")
+
+    if not email or not phone or not pin:
+        return err("Email, phone and PIN are required")
+    if len(pin) != 6 or not pin.isdigit():
+        return err("PIN must be exactly 6 digits")
+    if len(new_password) < 6:
+        return err("New password must be at least 6 characters")
+
+    conn = get_db()
+    cur  = conn.cursor()
+    cur.execute("SELECT * FROM users WHERE email=%s AND role='client'", (email,))
+    u = cur.fetchone()
+
+    if not u:
+        cur.close(); conn.close()
+        return err("No matching account found", 404)
+
+    stored_phone = mpesa_format_phone(u["phone"] or "")
+    given_phone  = mpesa_format_phone(phone)
+
+    if not u["phone"] or stored_phone != given_phone or u["pin_hash"] != _hash(pin):
+        cur.close(); conn.close()
+        return err("Details do not match our records", 403)
+
+    cur.execute("UPDATE users SET password_hash=%s WHERE id=%s",
+                (_hash(new_password), u["id"]))
+    conn.commit()
+    cur.close(); conn.close()
+
+    log.info(f"Password reset via forgot-password flow: {u['email']}")
+    return ok({"message": "Password updated. You can now sign in with your new password."})
 
 # ── CLIENT API ────────────────────────────────────────────────────────────────
 @app.route("/api/client/summary")
@@ -1539,6 +1607,51 @@ def admin_edit_client(uid):
         cur.close(); conn.close()
         return err("That email is already used by another account", 409)
 
+# ── ADMIN: RESET CLIENT PASSWORD (v5.13) ──────────────────────────────────────
+@app.route("/api/admin/client/<uid>/reset-password", methods=["POST"])
+@admin_required
+def admin_reset_client_password(uid):
+    """
+    Admin sets a new password directly for a client — no PIN or old
+    password required. Called from the client Edit view in the admin
+    dashboard. Optionally creates an in-platform notification so the
+    client knows their password changed.
+
+    Body: { new_password: str, notify: bool (default true) }
+    """
+    d            = request.json or {}
+    new_password = d.get("new_password","")
+    notify       = bool(d.get("notify", True))
+
+    if len(new_password) < 6:
+        return err("New password must be at least 6 characters")
+
+    conn = get_db()
+    cur  = conn.cursor()
+    cur.execute("SELECT id, name, email FROM users WHERE id=%s AND role='client'", (uid,))
+    u = cur.fetchone()
+    if not u:
+        cur.close(); conn.close()
+        return err("Client not found", 404)
+
+    cur.execute("UPDATE users SET password_hash=%s WHERE id=%s",
+                (_hash(new_password), uid))
+
+    if notify:
+        create_notification(
+            cur, uid,
+            "Your password was reset",
+            "An administrator has reset your account password. If you did not "
+            "request this, please contact support immediately.",
+            "ALERT"
+        )
+
+    conn.commit()
+    cur.close(); conn.close()
+
+    log.info(f"Admin reset password for client {u['email']}")
+    return ok({"message": f"Password reset for {u['name']}"})
+
 @app.route("/api/admin/trade/run", methods=["POST"])
 @admin_required
 def admin_run_trades():
@@ -1812,7 +1925,7 @@ start_scheduler()
 
 if __name__ == "__main__":
     print("\n" + "="*60)
-    print("   Summit Wealth v5.11 — $8 FLAT PROFIT PER $100 NET DEPOSITED")
+    print("   Summit Wealth v5.13 — $8 FLAT PROFIT PER $100 NET DEPOSITED")
     print("="*60)
     print(f"   URL    : http://127.0.0.1:8080")
     print(f"   Client : john@test.com  / demo1234")
@@ -1824,5 +1937,6 @@ if __name__ == "__main__":
     print(f"   TRC20  : {'SET ✓' if MANUAL_WALLETS.get('TRC20') else 'NOT SET ✗'}")
     print(f"   M-Pesa : STK Push | Env: {MPESA_ENV} | Shortcode: {MPESA_SHORTCODE}")
     print(f"   KES/USD: {KES_PER_USD} | Callback: {MPESA_CALLBACK_URL}")
+    print(f"   Forgot Password: /forgot-password (email+phone+PIN verification)")
     print("="*60 + "\n")
     app.run(debug=False, port=8080, host="0.0.0.0")

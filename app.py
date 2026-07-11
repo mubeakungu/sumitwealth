@@ -1322,7 +1322,7 @@ def client_withdraw():
     addr = d.get("address","").strip()
     pin  = d.get("pin","")
 
-    if amt < 1000:          return err("Minimum withdrawal is $1,000")
+    if amt < 10:          return err("Minimum withdrawal is $10")
     if not addr:            return err("Enter withdrawal address")
     if net not in NETWORKS: return err("Invalid network")
 

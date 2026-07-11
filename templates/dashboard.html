@@ -317,7 +317,7 @@
       <div class="alert alert-success" id="wdrOk"></div>
       <div class="form-group">
         <label>Amount (USDT)</label>
-        <input type="number" id="wdrAmount" placeholder="1000" min="1000">
+        <input type="number" id="wdrAmount" placeholder="10" min="10">
       </div>
       <div class="form-group">
         <label>Network</label>
@@ -754,7 +754,7 @@
     const addr = document.getElementById('wdrAddr').value.trim();
     const pin  = document.getElementById('wdrPin').value;
     const net  = document.getElementById('wdrNetwork').value;
-    if(amt<1000)  {showErr('wdrErr','Min $1,000');return;}
+    if(amt<10)    {showErr('wdrErr','Min $10');return;}
     if(!addr)     {showErr('wdrErr','Enter wallet address');return;}
     if(!pin)      {showErr('wdrErr','Enter your PIN');return;}
     const d=await post('/api/client/withdraw',{amount:amt,address:addr,pin,network:net});

@@ -60,6 +60,10 @@ Summit Wealth v5.13 - $8 PROFIT PER $100 BALANCE (8% daily)
               set a new password directly for any client from the admin
               dashboard's client-edit view, with an optional in-platform
               notification (reuses the existing notifications table).
+- FIX v5.14: Startup banner incorrectly printed "Min Withdrawal: $1,000"
+            even though /api/client/withdraw has always enforced a $10
+            minimum. Banner text corrected to match actual enforced value
+            (no behavior change).
 """
 
 import os, hashlib, secrets, datetime, uuid, logging, threading, random, base64
@@ -1322,7 +1326,7 @@ def client_withdraw():
     addr = d.get("address","").strip()
     pin  = d.get("pin","")
 
-    if amt < 10:          return err("Minimum withdrawal is $10")
+    if amt < 10:            return err("Minimum withdrawal is $10")
     if not addr:            return err("Enter withdrawal address")
     if net not in NETWORKS: return err("Invalid network")
 
@@ -1932,7 +1936,7 @@ if __name__ == "__main__":
     print(f"   Admin  : admin@test.com / admin1234")
     print(f"   Rate   : ${DAILY_PROFIT_PER_100} per $100 net deposited/day (flat, non-compounding) at {TRADE_HOUR:02d}:00 UTC ({TRADE_HOUR+3:02d}:00 EAT)")
     print(f"   Symbol : {TRADE_SYMBOL}")
-    print(f"   Min Dep: $100  |  Min Withdrawal: $1,000  |  Ref Withdrawal: $16")
+    print(f"   Min Dep: $100  |  Min Withdrawal: $10  |  Ref Withdrawal: $16")
     print(f"   Binance: {'CONNECTED ✓' if bnb else 'fallback prices'}")
     print(f"   TRC20  : {'SET ✓' if MANUAL_WALLETS.get('TRC20') else 'NOT SET ✗'}")
     print(f"   M-Pesa : STK Push | Env: {MPESA_ENV} | Shortcode: {MPESA_SHORTCODE}")

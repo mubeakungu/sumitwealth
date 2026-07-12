@@ -355,6 +355,91 @@
     </div>
   </div>
 
+
+  <!-- ══════════════════════════════════════════════════════════════════════════
+   ADD-ON: "Run Missed Trade" button for admin_dashboard.html
+   Adds a per-client action in the Clients tab to backfill today's trade
+   for one account (e.g. after a DB outage skipped the scheduled run).
+
+   Requires the backend route from run_single_client_trade_snippet.py
+   (POST /api/admin/trade/run-single) to already be added to app.py.
+══════════════════════════════════════════════════════════════════════════ -->
+
+<!-- STEP 1: In renderClients(), find the <th>Edit</th> header and the row's
+     Edit <td> at the end, and add a new column right before it. -->
+
+<!-- Header row change — find this line: -->
+<!--   <th>Ref Code</th><th>Joined</th><th>Edit</th> -->
+<!-- Replace with: -->
+<!--   <th>Ref Code</th><th>Joined</th><th>Trade</th><th>Edit</th> -->
+
+<!-- STEP 2: In the row-building loop, find the final </tr> and the Edit <td>
+     just before it: -->
+<!--
+      <td>
+        <button class="btn-sm"
+          style="background:rgba(212,175,55,0.1);border:1px solid #d4af37;color:#d4af37;"
+          onclick="openEditClientModal('${c.id}')">
+          &#9998; Edit
+        </button>
+      </td>
+    </tr>`;
+-->
+<!-- Replace with: -->
+<!--
+      <td>
+        <button class="btn-sm"
+          style="background:rgba(0,165,80,0.1);border:1px solid #00a550;color:#00a550;"
+          onclick="runMissedTrade('${c.id}', '${escAttr(c.name || "")}')"
+          id="tradeBtn-${c.id}">
+          &#128200; Run Trade
+        </button>
+      </td>
+      <td>
+        <button class="btn-sm"
+          style="background:rgba(212,175,55,0.1);border:1px solid #d4af37;color:#d4af37;"
+          onclick="openEditClientModal('${c.id}')">
+          &#9998; Edit
+        </button>
+      </td>
+    </tr>`;
+-->
+
+<!-- STEP 3: Add this JS function anywhere in the <script> block, e.g. right
+     after populateAdjustClients(): -->
+
+<script>
+async function runMissedTrade(uid, clientName) {
+  if (!confirm(`Run today's trade for ${clientName}?\n\nThis will credit their account with today's profit. Only do this if you've confirmed the scheduled run was skipped for them.`)) {
+    return;
+  }
+
+  const btn = document.getElementById('tradeBtn-' + uid);
+  const originalLabel = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = 'Running...';
+  }
+
+  try {
+    const d = await post('/api/admin/trade/run-single', { user_id: uid });
+    if (!d.success) {
+      showError(d.error);
+      return;
+    }
+    showSuccess(d.data.message);
+    await refreshData();
+  } catch (e) {
+    showError('Network error — please try again');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = originalLabel;
+    }
+  }
+}
+</script>
+
   <!-- REFERRAL TAB -->
   <div id="referral" class="tab-content">
 

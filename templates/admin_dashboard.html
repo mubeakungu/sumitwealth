@@ -277,20 +277,36 @@
     </div>
   </div>
 
-  <!-- TRADES -->
-  <div id="trades" class="tab-content">
-    <div class="panel">
-      <div class="panel-title">&#128200; All Trades</div>
-      <div class="filter-bar">
-        <select id="tradeStatusFilter" onchange="loadTrades()">
-          <option value="">All</option>
-          <option value="OPEN">Open</option>
-          <option value="CLOSED">Closed</option>
-        </select>
-      </div>
-      <div id="tradeList" class="loading">Loading...</div>
+ <!-- TRADES -->
+<div id="trades" class="tab-content">
+  <div class="panel">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;flex-wrap:wrap;gap:10px;">
+      <div class="panel-title" style="margin-bottom:0;">📈 All Trades</div>
+      <button class="btn btn-gold" onclick="openRunTradesModal()">▶ Run Today's Trades Manually</button>
     </div>
+    <div class="filter-bar">
+      <select id="tradeStatusFilter" onchange="loadTrades()">
+        <option value="">All</option>
+        <option value="OPEN">Open</option>
+        <option value="CLOSED">Closed</option>
+      </select>
+    </div>
+    <div id="tradeList" class="loading">Loading...</div>
   </div>
+</div>
+
+<!-- RUN TRADES MODAL -->
+<div class="modal-overlay" id="runTradesModal">
+  <div class="modal">
+    <h3>▶ Run Today's Trades</h3>
+    <p style="color:#aaa;font-size:13px;margin-bottom:18px;">
+      Credits <strong style="color:#d4af37;">$8 per $100 balance</strong>
+      to every active client immediately.<br><br>
+      Use this if today's automatic trade was missed.
+    </p>
+    <div id="runTradesResult" style="display:none;padding:12px;border-radius:6px;margin-bottom:14px;font-size:13px;"></div>
+    <div class="modal-btns">
+      <button class="btn" style="background:#333;color:#aaa;" onclick="closeModal('runTradesModal')">Cancel</button>
 
   <!-- ADJUST -->
   <div id="adjust" class="tab-content">

@@ -88,8 +88,13 @@
     .spinner { width:36px; height:36px; border:3px solid #333; border-top-color:#d4af37; border-radius:50%; margin:0 auto 14px; animation:spin 0.8s linear infinite; }
     @keyframes spin { to { transform:rotate(360deg); } }
 
-    .ref-code-box { background:#0a0e27; border:1px solid #d4af37; border-radius:6px; padding:14px 18px; display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:10px; }
+    .ref-code-box { background:#0a0e27; border:1px solid #d4af37; border-radius:6px; padding:14px 18px; display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px; }
     .ref-code-box .code { font-family:monospace; font-size:18px; color:#d4af37; font-weight:bold; letter-spacing:1px; }
+
+    .ref-link-box { background:#0a0e27; border:1px solid #2a2f4a; border-radius:6px; padding:12px 16px; display:flex; align-items:center; gap:10px; margin-bottom:20px; flex-wrap:wrap; }
+    .ref-link-box .link-label { font-size:11px; color:#aaa; width:100%; margin-bottom:2px; }
+    .ref-link-input { flex:1; min-width:200px; background:transparent; border:none; color:#d4af37; font-family:monospace; font-size:12px; padding:4px 0; }
+    .ref-link-input:focus { outline:none; }
 
     .notif-panel { position:fixed; top:60px; right:20px; width:320px; max-height:400px; overflow-y:auto; background:#1a1f3a; border:1px solid #d4af37; border-radius:8px; padding:14px; display:none; z-index:2000; box-shadow:0 10px 30px rgba(0,0,0,0.5); }
     .notif-panel.show { display:block; }
@@ -331,6 +336,12 @@
         <button class="btn-sm btn-gold" onclick="copyRefCode()">&#128203; Copy</button>
       </div>
 
+      <div class="ref-link-box">
+        <div class="link-label">Your referral link</div>
+        <input type="text" class="ref-link-input" id="refLinkVal" value="—" readonly onclick="this.select()">
+        <button class="btn-sm btn-gold" onclick="copyRefLink()">&#128203; Copy Link</button>
+      </div>
+
       <div class="alert alert-success" id="refSuccess"></div>
       <div class="alert alert-error"   id="refError"></div>
 
@@ -426,6 +437,13 @@ async function loadSummary() {
   document.getElementById('statRefCount').textContent   = s.ref_count || 0;
   document.getElementById('statDaysTraded').textContent = s.days_traded || 0;
   document.getElementById('refCodeVal').textContent     = s.ref_code || '—';
+
+  const refLinkEl = document.getElementById('refLinkVal');
+  if (s.ref_code) {
+    refLinkEl.value = window.location.origin + '/register?ref=' + encodeURIComponent(s.ref_code);
+  } else {
+    refLinkEl.value = '—';
+  }
 
   const netColor = (s.total_profit || 0) >= 0 ? '#00e090' : '#ff4560';
   const plEl = document.getElementById('plVal');
@@ -564,6 +582,13 @@ async function submitWithdraw() {
 function copyRefCode() {
   const code = document.getElementById('refCodeVal').textContent;
   navigator.clipboard.writeText(code).then(() => showSuccess('Referral code copied!', 'refSuccess'));
+}
+
+function copyRefLink() {
+  const linkEl = document.getElementById('refLinkVal');
+  const link = linkEl.value;
+  if (!link || link === '—') return;
+  navigator.clipboard.writeText(link).then(() => showSuccess('Referral link copied!', 'refSuccess'));
 }
 
 async function submitRefWithdraw() {

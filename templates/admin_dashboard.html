@@ -99,6 +99,15 @@
       max-width:180px; vertical-align:middle;
     }
 
+    /* ── Scheduler status pill (top right) ── */
+    .sched-pill {
+      display:inline-flex; align-items:center; gap:6px;
+      font-size:11px; padding:4px 10px; border-radius:20px;
+      border:1px solid #2a2f4a; color:#aaa;
+    }
+    .sched-dot { width:7px; height:7px; border-radius:50%; background:#555; }
+    .sched-dot.on { background:#00e090; box-shadow:0 0 6px #00e090; }
+
     @media(max-width:900px) { .stats{grid-template-columns:repeat(2,1fr);} .charts-row{grid-template-columns:1fr;} }
   </style>
 </head>
@@ -107,6 +116,7 @@
 <div class="navbar">
   <div class="nav-brand">&#128176; SUMMIT WEALTH — Admin</div>
   <div class="nav-right">
+    <span class="sched-pill" id="schedPill"><span class="sched-dot" id="schedDot"></span><span id="schedText">Scheduler: —</span></span>
     <span style="font-size:11px;color:#555;" id="lastRefreshed"></span>
     <span class="admin-badge">&#128737; ADMIN</span>
     <button class="btn btn-red" onclick="logout()">Logout</button>
@@ -229,6 +239,12 @@
   <div id="clients" class="tab-content">
     <div class="panel">
       <div class="panel-title">&#128100; All Clients</div>
+      <p style="color:#666;font-size:11px;margin:-10px 0 14px;">
+        &#9432; Daily trades still run automatically every day — the
+        <strong style="color:#00e090;">Run Trade</strong> button below is only for
+        backfilling a client who was missed on a specific day (e.g. a DB outage),
+        and is blocked if that client already has a trade logged for today.
+      </p>
       <div class="filter-bar">
         <input type="text" id="clientSearch" placeholder="Search by name or email..." oninput="filterClients()">
       </div>
@@ -473,6 +489,34 @@
   </div>
 </div>
 
+<!-- RUN MISSED TRADE MODAL (NEW) -->
+<div class="modal-overlay" id="runTradeModal">
+  <div class="modal">
+    <h3>&#128200; Run Missed Trade</h3>
+    <p style="color:#aaa;font-size:13px;margin-bottom:18px;">
+      Backfills <strong>today's</strong> trade for this client only. Use this if their
+      automatic daily trade was skipped (e.g. the database was unavailable at run time).
+      The daily scheduler itself is untouched and will keep running normally for everyone else.
+    </p>
+    <div style="background:#0a0e27;border:1px solid #2a2f4a;border-radius:6px;padding:14px;margin-bottom:14px;font-size:13px;line-height:2.1;">
+      <div><span style="color:#aaa;">Client:</span> <strong id="runTradeClientName"></strong></div>
+      <div><span style="color:#aaa;">Net Deposit:</span> <span id="runTradeNetDeposit" style="color:#d4af37;font-weight:bold;"></span></div>
+    </div>
+    <div style="background:rgba(255,200,0,0.08);border:1px solid rgba(255,200,0,0.35);border-radius:6px;padding:10px 12px;margin-bottom:14px;font-size:11px;color:#ffc800;line-height:1.6;">
+      &#9888; This is blocked automatically if the client already has a trade logged
+      for today, so it cannot be used to double-pay someone.
+    </div>
+    <div class="alert alert-error" id="runTradeErr"></div>
+    <input type="hidden" id="runTradeUid">
+    <div class="modal-btns">
+      <button class="btn" style="background:#333;color:#aaa;" onclick="closeModal('runTradeModal')">Cancel</button>
+      <button class="btn btn-green" style="border:1px solid #00e090;" onclick="confirmRunTrade()" id="runTradeConfirmBtn">
+        &#9989; Run Trade Now
+      </button>
+    </div>
+  </div>
+</div>
+
 <script>
 const api  = (url,opts={}) => fetch(url,{credentials:'same-origin',...opts}).then(r=>r.json());
 const post = (u,b) => api(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
@@ -553,6 +597,16 @@ async function loadStats() {
   const wc = document.getElementById('pendingWdrCount');
   if (s.pending_withdrawals > 0) { wc.textContent = s.pending_withdrawals; wc.style.display = 'inline'; }
   else wc.style.display = 'none';
+
+  const dot = document.getElementById('schedDot');
+  const txt = document.getElementById('schedText');
+  if (s.scheduler_running) {
+    dot.classList.add('on');
+    txt.textContent = `Scheduler: running (${s.trades_today || 0} trades today)`;
+  } else {
+    dot.classList.remove('on');
+    txt.textContent = 'Scheduler: not running';
+  }
 
   document.getElementById('lastRefreshed').textContent =
     'Last updated: ' + new Date().toLocaleTimeString();
@@ -766,7 +820,7 @@ function renderClients(clients) {
     <th>Total Deposits</th><th>Total Withdrawals</th>
     <th>Trade Profits</th><th>Ref Earned</th><th>Ref Balance</th>
     <th>Referrals</th><th>Days Active</th><th>Total Generated</th>
-    <th>Ref Code</th><th>Joined</th><th>Edit</th>
+    <th>Ref Code</th><th>Joined</th><th>Trade</th><th>Edit</th>
   </tr></thead><tbody>`;
 
   let sumBalance = 0, sumEquity = 0, sumDeposits = 0, sumWithdrawals = 0,
@@ -804,6 +858,13 @@ function renderClients(clients) {
       <td style="color:#ffc800;font-weight:bold;">${fmtD(gen)}</td>
       <td style="font-family:monospace;font-size:11px;color:#aaa;">${escHtml(c.referral_code || '—')}</td>
       <td style="color:#555;font-size:11px;">${(c.created_at || '').substring(0, 10)}</td>
+      <td>
+        <button class="btn-sm"
+          style="background:rgba(0,224,144,0.1);border:1px solid #00e090;color:#00e090;"
+          onclick="openRunTradeModal('${c.id}')" id="tradeBtn-${c.id}">
+          &#128200; Run Trade
+        </button>
+      </td>
       <td>
         <button class="btn-sm"
           style="background:rgba(212,175,55,0.1);border:1px solid #d4af37;color:#d4af37;"
@@ -1060,6 +1121,42 @@ async function resetClientPassword() {
     document.getElementById('resetPwNew').value = '';
   } catch (e) {
     showError('Network error — please try again', 'resetPwErr');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = originalLabel;
+  }
+}
+
+// ── RUN MISSED TRADE (NEW — single-client backfill, scheduler untouched) ────
+function openRunTradeModal(uid) {
+  const c = _clientMap[uid];
+  if (!c) return;
+  document.getElementById('runTradeUid').value = uid;
+  document.getElementById('runTradeClientName').textContent = c.name || '—';
+  const netDep = parseFloat(c.total_deposits || 0) - parseFloat(c.total_withdrawals || 0);
+  document.getElementById('runTradeNetDeposit').textContent = fmtD(netDep);
+  document.getElementById('runTradeErr').classList.remove('show');
+  document.getElementById('runTradeModal').classList.add('show');
+}
+
+async function confirmRunTrade() {
+  const uid = document.getElementById('runTradeUid').value;
+  const btn = document.getElementById('runTradeConfirmBtn');
+  const originalLabel = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = 'Running...';
+
+  try {
+    const d = await post('/api/admin/trade/run-single', { user_id: uid });
+    if (!d.success) {
+      showError(d.error, 'runTradeErr');
+      return;
+    }
+    closeModal('runTradeModal');
+    showSuccess(d.data.message);
+    await refreshData();
+  } catch (e) {
+    showError('Network error — please try again', 'runTradeErr');
   } finally {
     btn.disabled = false;
     btn.innerHTML = originalLabel;

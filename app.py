@@ -64,6 +64,12 @@ Summit Wealth v5.13 - $8 PROFIT PER $100 BALANCE (8% daily)
             even though /api/client/withdraw has always enforced a $10
             minimum. Banner text corrected to match actual enforced value
             (no behavior change).
+- NEW v5.15: Added POST /api/admin/trade/run-single — lets an admin backfill
+            today's trade for ONE specific client (e.g. if the scheduled
+            run was skipped for them due to a DB outage). Uses the same
+            eligibility/payout logic as run_daily_trades(), scoped to a
+            single user_id, and is idempotent via the same
+            UNIQUE(user_id, date) constraint.
 """
 
 import os, hashlib, secrets, datetime, uuid, logging, threading, random, base64
@@ -260,12 +266,6 @@ CREATE TABLE IF NOT EXISTS notifications (
 
     conn.commit()
 
-    # ── FIX v5.10: enforce one daily_trade_log row per (user_id, date) ──────
-    # This is what actually stops double-crediting. Without this constraint,
-    # two concurrent workers (or two manual "Run Trades" clicks) can both
-    # pass the old SELECT check before either INSERT lands, and both credit
-    # the account. First, deduplicate any existing double-paid rows, then
-    # add the constraint so it can never happen again.
     try:
         cur.execute("""
             DELETE FROM daily_trade_log a USING daily_trade_log b
@@ -382,8 +382,6 @@ def get_live_price(symbol):
     log.info(f"Using fallback price {symbol}: ${price:,.2f}")
     return price
 
-# FIX v5.10: process-local lock so a manual admin trade-run can't overlap
-# a concurrently firing scheduled run within the SAME worker process.
 _trade_run_lock = threading.Lock()
 
 def run_daily_trades():
@@ -408,10 +406,6 @@ def run_daily_trades():
 
         conn = get_db()
         cur  = conn.cursor()
-        # FIX v5.11: eligibility and profit are based on NET DEPOSITS
-        # (completed deposits minus completed *principal* withdrawals),
-        # not live/compounding balance. Referral withdrawals are excluded
-        # since they only ever draw from ref_balance, never principal.
         cur.execute(
             "SELECT u.id, u.name, a.id AS account_id, a.balance, "
             "  COALESCE((SELECT SUM(amount_usd) FROM transactions "
@@ -428,7 +422,6 @@ def run_daily_trades():
         paid = 0
 
         for c in clients:
-            # Flat $8 per $100 of net deposit — does NOT compound off balance.
             client_profit   = round((c["net_deposit"] / 100.0) * DAILY_PROFIT_PER_100, 2)
             client_quantity = round(client_profit / price_diff, 6)
 
@@ -441,12 +434,6 @@ def run_daily_trades():
             tp               = close_price
 
             try:
-                # ── FIX v5.10: atomic claim ──────────────────────────────
-                # This single INSERT is the ONLY thing that decides whether
-                # this client gets paid today. If another worker/thread has
-                # already inserted a row for (user_id, date), the unique
-                # index makes this a guaranteed no-op (rowcount 0) instead
-                # of a duplicate payout. No SELECT-then-INSERT race window.
                 cur.execute(
                     "INSERT INTO daily_trade_log(id,user_id,account_id,trade_id,"
                     "profit,date,created_at) VALUES(%s,%s,%s,%s,%s,%s,%s) "
@@ -744,16 +731,6 @@ def api_logout():
 def api_forgot_password():
     """
     Self-service password reset for clients.
-
-    There's no SMTP configured for Summit Wealth (unlike Zappest), so
-    instead of an emailed reset link, identity is verified using three
-    things the client already has on file:
-        - their account email
-        - their registered phone number
-        - their 6-digit PIN (the same PIN used for withdrawals)
-    All three must match before the password is changed. Admin accounts
-    are excluded — admins are reset by another admin via the admin panel.
-
     Body: { email, phone, pin, new_password }
     """
     d            = request.json or {}
@@ -825,9 +802,6 @@ def client_summary():
     )
     wdr = cur.fetchone()
 
-    # FIX v5.11: principal withdrawals only (excludes REFERRAL_WITHDRAWAL,
-    # which draws from ref_balance and never affects the profit-earning
-    # principal). Used to compute the flat, non-compounding net deposit.
     cur.execute(
         """
         SELECT COALESCE(SUM(amount_usd), 0) AS s
@@ -879,8 +853,6 @@ def client_summary():
     conn.close()
 
     balance        = a["balance"] if a else 0
-    # FIX v5.11: flat basis — net_deposit stays constant unless the client
-    # deposits more or withdraws principal, so this no longer compounds.
     net_deposit    = round(dep["s"] - principal_wdr["s"], 2)
     expected_daily = round((net_deposit / 100.0) * DAILY_PROFIT_PER_100, 2) if net_deposit >= MIN_BALANCE else 0
 
@@ -1082,12 +1054,6 @@ def client_deposit_address():
 @app.route("/api/client/mpesa/stk-push", methods=["POST"])
 @login_required
 def client_mpesa_stk_push():
-    """
-    Initiate M-Pesa STK Push.
-    Body: { phone_number: "0712345678", amount: <KES int> }
-    Converts amount KES → USD, creates PENDING transaction,
-    fires STK Push, stores CheckoutRequestID for callback matching.
-    """
     d          = request.json or {}
     uid        = session["user_id"]
     amount_kes = float(d.get("amount", 0))
@@ -1098,10 +1064,7 @@ def client_mpesa_stk_push():
     if not phone:
         return err("Phone number is required")
 
-    # Normalise phone
     phone_fmt = mpesa_format_phone(phone)
-
-    # Convert KES → USD
     amount_usd = round(amount_kes / KES_PER_USD, 2)
     if amount_usd < 1:
         return err("Amount too low after conversion")
@@ -1115,7 +1078,6 @@ def client_mpesa_stk_push():
     ref   = "SWC-" + secrets.token_hex(4).upper()
     note  = f"STK Push | Phone: {phone_fmt} | KES: {int(amount_kes)}"
 
-    # Create PENDING transaction first
     cur.execute(
         "INSERT INTO transactions(id,user_id,account_id,type,method,amount_usd,"
         "reference,status,note,deposit_address,created_at) "
@@ -1125,7 +1087,6 @@ def client_mpesa_stk_push():
     )
     conn.commit()
 
-    # Fire STK Push to Daraja
     push_ok, result = mpesa_stk_push(
         phone       = phone,
         amount_kes  = int(amount_kes),
@@ -1134,7 +1095,6 @@ def client_mpesa_stk_push():
     )
 
     if not push_ok:
-        # Mark as rejected so it doesn't linger as pending
         cur.execute(
             "UPDATE transactions SET status='REJECTED', note=%s WHERE id=%s",
             (f"STK Push failed: {result}", tx_id)
@@ -1143,7 +1103,6 @@ def client_mpesa_stk_push():
         cur.close(); conn.close()
         return err(result)
 
-    # Store Daraja CheckoutRequestID in binance_tx_id column for callback lookup
     cur.execute(
         "UPDATE transactions SET binance_tx_id=%s WHERE id=%s",
         (result, tx_id)
@@ -1165,11 +1124,6 @@ def client_mpesa_stk_push():
 @app.route("/api/client/mpesa/status")
 @login_required
 def client_mpesa_status():
-    """
-    Poll STK Push payment status by CheckoutRequestID.
-    Dashboard calls this every 5s while waiting screen is shown.
-    Returns: { status: PENDING|COMPLETED|REJECTED, amount, mpesa_code, reference }
-    """
     checkout_id = request.args.get("checkout_request_id", "").strip()
     if not checkout_id:
         return err("checkout_request_id is required")
@@ -1185,10 +1139,8 @@ def client_mpesa_status():
     cur.close(); conn.close()
 
     if not tx:
-        # Not found yet — still pending
         return ok({"status": "PENDING"})
 
-    # Extract M-Pesa receipt number from note if payment completed
     mpesa_code = ""
     if tx["status"] == "COMPLETED" and tx["note"] and "MpesaRef:" in tx["note"]:
         try:
@@ -1197,7 +1149,7 @@ def client_mpesa_status():
             pass
 
     return ok({
-        "status":     tx["status"],       # PENDING / COMPLETED / REJECTED
+        "status":     tx["status"],
         "amount":     tx["amount_usd"],
         "mpesa_code": mpesa_code,
         "reference":  tx["reference"],
@@ -1208,11 +1160,6 @@ def client_mpesa_status():
 # ── M-PESA CALLBACK (Daraja → this endpoint) ─────────────────────────────────
 @app.route("/mpesa/callback", methods=["POST"])
 def mpesa_callback():
-    """
-    Daraja STK Push result callback.
-    ResultCode 0 = success → credit account.
-    Any other code = failed/cancelled → reject transaction.
-    """
     try:
         data = request.json or {}
         log.info(f"M-Pesa callback received: {data}")
@@ -1237,7 +1184,6 @@ def mpesa_callback():
             return jsonify({"ResultCode": 0, "ResultDesc": "Accepted"})
 
         if result_code == 0:
-            # Payment successful — extract metadata and credit account
             meta       = stk.get("CallbackMetadata", {}).get("Item", [])
             mpesa_ref  = next((i["Value"] for i in meta if i.get("Name") == "MpesaReceiptNumber"), "")
             amount_kes = next((i["Value"] for i in meta if i.get("Name") == "Amount"), "")
@@ -1258,7 +1204,6 @@ def mpesa_callback():
                 f"+${tx['amount_usd']} | MpesaRef: {mpesa_ref}"
             )
 
-            # Process referral commission in background
             threading.Thread(
                 target=process_referral_commission,
                 args=(tx["id"], tx["user_id"], tx["amount_usd"]),
@@ -1280,7 +1225,6 @@ def mpesa_callback():
     except Exception as e:
         log.error(f"M-Pesa callback error: {e}")
 
-    # Always return 200 to Safaricom
     return jsonify({"ResultCode": 0, "ResultDesc": "Accepted"})
 
 
@@ -1577,7 +1521,7 @@ def admin_adjust_balance(uid):
         "reference,status,note,created_at,completed_at) "
         "VALUES(%s,%s,%s,'ADJUSTMENT','MANUAL',%s,%s,'COMPLETED',%s,%s,%s)",
         (_uid(), uid, a["id"], abs(amount),
-         "ADJ-"+secrets.token_hex(4).upper(), note, _now(), _now(), _now())
+         "ADJ-"+secrets.token_hex(4).upper(), note, _now(), _now())
     )
     conn.commit()
     cur.close(); conn.close()
@@ -1615,14 +1559,6 @@ def admin_edit_client(uid):
 @app.route("/api/admin/client/<uid>/reset-password", methods=["POST"])
 @admin_required
 def admin_reset_client_password(uid):
-    """
-    Admin sets a new password directly for a client — no PIN or old
-    password required. Called from the client Edit view in the admin
-    dashboard. Optionally creates an in-platform notification so the
-    client knows their password changed.
-
-    Body: { new_password: str, notify: bool (default true) }
-    """
     d            = request.json or {}
     new_password = d.get("new_password","")
     notify       = bool(d.get("notify", True))
@@ -1655,6 +1591,114 @@ def admin_reset_client_password(uid):
 
     log.info(f"Admin reset password for client {u['email']}")
     return ok({"message": f"Password reset for {u['name']}"})
+
+# ── ADMIN: RUN MISSED TRADE FOR ONE CLIENT (v5.15 — NEW) ──────────────────────
+@app.route("/api/admin/trade/run-single", methods=["POST"])
+@admin_required
+def admin_run_single_client_trade():
+    """
+    Backfill today's trade for ONE client who was skipped by the scheduled
+    run (e.g. due to a DB outage during the trigger window). Uses the same
+    eligibility/payout logic as run_daily_trades(), scoped to a single
+    user_id. Idempotent via the same UNIQUE(user_id, date) constraint on
+    daily_trade_log — calling it twice for the same client/day is a no-op
+    with a clear error, not a double payout.
+
+    Body: { "user_id": "<id>" }
+    """
+    d   = request.json or {}
+    uid = d.get("user_id", "").strip()
+    if not uid:
+        return err("user_id required")
+
+    conn = get_db()
+    cur  = conn.cursor()
+
+    cur.execute(
+        "SELECT u.id, u.name, a.id AS account_id, a.balance, "
+        "  COALESCE((SELECT SUM(amount_usd) FROM transactions "
+        "            WHERE user_id=u.id AND type='DEPOSIT' AND status='COMPLETED'), 0) "
+        "  - COALESCE((SELECT SUM(amount_usd) FROM transactions "
+        "              WHERE user_id=u.id AND type='WITHDRAWAL' AND status='COMPLETED'), 0) "
+        "  AS net_deposit "
+        "FROM users u JOIN accounts a ON u.id=a.user_id "
+        "WHERE u.id=%s AND u.role='client'", (uid,)
+    )
+    c = cur.fetchone()
+    if not c:
+        cur.close(); conn.close()
+        return err("Client not found", 404)
+
+    if c["net_deposit"] < MIN_BALANCE:
+        cur.close(); conn.close()
+        return err(f"Client net deposit (${c['net_deposit']:.2f}) is below minimum (${MIN_BALANCE})")
+
+    today = _today()
+
+    cur.execute(
+        "SELECT 1 FROM daily_trade_log WHERE user_id=%s AND date=%s", (uid, today)
+    )
+    if cur.fetchone():
+        cur.close(); conn.close()
+        return err(f"{c['name']} already has a trade logged for {today}")
+
+    price       = get_live_price(TRADE_SYMBOL)
+    pct_gain    = random.uniform(0.003, 0.005)
+    close_price = round(price * (1 + pct_gain), 2)
+    price_diff  = close_price - price
+    if price_diff <= 0:
+        cur.close(); conn.close()
+        return err("Price diff was zero — try again")
+
+    client_profit   = round((c["net_deposit"] / 100.0) * DAILY_PROFIT_PER_100, 2)
+    client_quantity = round(client_profit / price_diff, 6)
+
+    now              = datetime.datetime.utcnow()
+    open_minutes_ago = random.randint(30, 90)
+    opened_at        = (now - datetime.timedelta(minutes=open_minutes_ago)).isoformat()
+    closed_at        = now.isoformat()
+    trade_id         = _uid()
+    sl               = round(price * 0.985, 2)
+    tp               = close_price
+
+    try:
+        cur.execute(
+            "INSERT INTO daily_trade_log(id,user_id,account_id,trade_id,"
+            "profit,date,created_at) VALUES(%s,%s,%s,%s,%s,%s,%s) "
+            "ON CONFLICT (user_id, date) DO NOTHING",
+            (_uid(), c["id"], c["account_id"], trade_id, client_profit, today, _now())
+        )
+        if cur.rowcount == 0:
+            conn.rollback()
+            cur.close(); conn.close()
+            return err(f"{c['name']} already traded today (race with another run)")
+
+        cur.execute(
+            "INSERT INTO trades(id,user_id,account_id,symbol,direction,"
+            "entry_price,quantity,stop_loss,take_profit,close_price,"
+            "pnl,status,close_reason,opened_at,closed_at) "
+            "VALUES(%s,%s,%s,%s,'BUY',%s,%s,%s,%s,%s,%s,'CLOSED','TAKE_PROFIT',%s,%s)",
+            (trade_id, c["id"], c["account_id"],
+             TRADE_SYMBOL, price, client_quantity, sl, tp,
+             close_price, client_profit, opened_at, closed_at)
+        )
+        cur.execute(
+            "UPDATE accounts SET balance=balance+%s, equity=equity+%s WHERE user_id=%s",
+            (client_profit, client_profit, c["id"])
+        )
+        conn.commit()
+        log.info(f"Manual single-client trade backfill: {c['name']} +${client_profit}")
+    except Exception as e:
+        conn.rollback()
+        cur.close(); conn.close()
+        return err(f"Failed to record trade: {e}")
+
+    cur.close(); conn.close()
+    return ok({
+        "message": f"Trade backfilled for {c['name']}: +${client_profit}",
+        "profit": client_profit,
+        "net_deposit": c["net_deposit"],
+    })
 
 @app.route("/api/admin/trade/run", methods=["POST"])
 @admin_required
@@ -1699,26 +1743,6 @@ def admin_trades():
 @app.route("/api/admin/migrate/flat-profit", methods=["POST"])
 @admin_required
 def admin_migrate_flat_profit():
-    """
-    ONE-OFF MIGRATION (v5.12) — runs in-process since free-tier Render has
-    no shell access. Corrects balances that were paid under the OLD
-    compounding formula (balance/100*8 daily) to match the NEW flat formula
-    (net_deposit/100*8, same amount every day).
-
-    Body: { "apply": false }  (default) -> dry run, computes and returns
-                                            deltas, writes NOTHING to the DB
-          { "apply": true }             -> commits the corrections:
-                                            - adjusts accounts.balance/equity
-                                            - logs a visible ADJUSTMENT/MIGRATION
-                                              transaction per affected client
-                                            - rewrites daily_trade_log.profit
-                                              rows to the flat amount
-                                            - creates an in-platform
-                                              notification for every client
-                                              whose balance changed
-    Always call with apply=false first and review the response before
-    calling again with apply=true.
-    """
     d     = request.json or {}
     apply = bool(d.get("apply", False))
 
@@ -1759,10 +1783,6 @@ def admin_migrate_flat_profit():
         days_traded        = len(trade_log_rows)
         old_total_profit   = round(sum(r["profit"] for r in trade_log_rows), 2)
 
-        # Flag clients with more than one deposit/withdrawal event — net
-        # deposit may not have been constant across their whole history, so
-        # the correction nets out the *total* correctly but isn't a perfect
-        # day-by-day reconstruction. Worth a manual look for these.
         cur.execute(
             "SELECT COUNT(*) AS c FROM transactions "
             "WHERE user_id=%s AND type IN ('DEPOSIT','WITHDRAWAL') AND status='COMPLETED'", (uid,)
@@ -1865,12 +1885,6 @@ def admin_referrals():
 @app.route("/api/admin/notifications/send", methods=["POST"])
 @admin_required
 def admin_send_notification():
-    """
-    Send a notification either to one client or broadcast to all clients.
-    Body: { "user_id": "<id>" }  -> single client
-          { "broadcast": true }  -> every client
-          "title": str, "message": str, "type": "INFO"|"WARNING"|"ALERT" (optional)
-    """
     d       = request.json or {}
     title   = d.get("title","").strip()
     message = d.get("message","").strip()

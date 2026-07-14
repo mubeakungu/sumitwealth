@@ -1,893 +1,137 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Summit Wealth — Dashboard</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <title>Summit Admin Login</title>
   <style>
-    * { margin:0; padding:0; box-sizing:border-box; }
-    body { font-family:Arial,sans-serif; background:#0a0e27; color:#fff; }
-    .navbar { background:#1a1f3a; padding:14px 30px; border-bottom:2px solid #d4af37; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; }
-    .nav-brand { font-size:18px; color:#d4af37; font-weight:bold; }
-    .nav-right { display:flex; align-items:center; gap:15px; }
-    .nav-user { font-size:13px; color:#ccc; }
-    .bell-btn { position:relative; background:none; border:none; color:#d4af37; font-size:17px; cursor:pointer; padding:4px; }
-    .bell-dot { position:absolute; top:0; right:0; width:8px; height:8px; background:#ff4560; border-radius:50%; display:none; }
-    .bell-dot.show { display:block; }
-    .btn { padding:8px 18px; border:none; border-radius:5px; cursor:pointer; font-size:13px; font-weight:bold; }
-    .btn-red  { background:#ff4560; color:#fff; }
-    .btn-gold { background:#d4af37; color:#0a0e27; }
-    .btn-sm   { padding:7px 14px; font-size:12px; border-radius:5px; border:none; cursor:pointer; font-weight:bold; }
-    .container { max-width:1400px; margin:0 auto; padding:25px 30px; }
-
-    .stats { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin-bottom:22px; }
-    .stat  { background:#1a1f3a; border:1px solid #2a2f4a; padding:16px 18px; border-radius:8px; }
-    .stat-label { font-size:10px; color:#aaa; text-transform:uppercase; letter-spacing:0.5px; }
-    .stat-val   { font-size:20px; color:#d4af37; font-weight:bold; margin-top:8px; }
-    .stat-sub   { font-size:11px; margin-top:4px; color:#aaa; }
-
-    .charts-row { display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:22px; }
-    .chart-card { background:#1a1f3a; border:1px solid #2a2f4a; border-radius:8px; padding:18px; }
-    .chart-card h3 { font-size:13px; color:#d4af37; margin-bottom:4px; }
-    .chart-subtitle { font-size:11px; color:#666; margin-bottom:14px; }
-    .price-row { display:flex; align-items:baseline; gap:10px; margin-bottom:10px; }
-    .price-val { font-size:22px; font-weight:bold; }
-    .price-chg { font-size:12px; }
-    .price-chg.up { color:#00e090; }
-    .price-chg.down { color:#ff4560; }
-    .price-stale { font-size:10px; color:#666; margin-left:6px; }
-    .symbol-tabs { display:flex; gap:6px; }
-    .symbol-tab { padding:4px 10px; font-size:11px; border-radius:14px; border:1px solid #333; background:#0a0e27; color:#aaa; cursor:pointer; }
-    .symbol-tab.active { background:#d4af37; color:#0a0e27; border-color:#d4af37; font-weight:bold; }
-    .pl-val { font-size:22px; font-weight:bold; }
-    .pl-val.pos { color:#00e090; } .pl-val.neg { color:#ff4560; }
-    .pl-sub { font-size:11px; margin-top:2px; }
-    .pl-sub.pos { color:#00e090; } .pl-sub.neg { color:#ff4560; }
-
-    .tabs { display:flex; gap:5px; margin-bottom:20px; flex-wrap:wrap; }
-    .tab  { padding:10px 20px; background:#1a1f3a; border:1px solid #333; cursor:pointer; color:#aaa; border-radius:5px; font-size:13px; }
-    .tab.active { background:#d4af37; color:#0a0e27; font-weight:bold; border-color:#d4af37; }
-    .panel { background:#1a1f3a; border:1px solid #2a2f4a; padding:22px; border-radius:8px; overflow-x:auto; }
-    .tab-content { display:none; }
-    .tab-content.show { display:block; }
-    .panel-title { font-size:15px; font-weight:bold; color:#d4af37; margin-bottom:18px; }
-
-    .tbl { width:100%; border-collapse:collapse; font-size:12px; }
-    .tbl th { padding:10px 12px; text-align:left; color:#d4af37; background:rgba(212,175,55,0.08); border-bottom:1px solid #333; white-space:nowrap; }
-    .tbl td { padding:10px 12px; border-bottom:1px solid #1e2440; vertical-align:middle; white-space:nowrap; }
-    .badge { display:inline-block; padding:2px 8px; border-radius:20px; font-size:10px; font-weight:bold; text-transform:uppercase; }
-    .badge-pending   { background:rgba(255,200,0,0.15);   color:#ffc800; }
-    .badge-completed { background:rgba(0,224,144,0.15);   color:#00e090; }
-    .badge-rejected  { background:rgba(255,69,96,0.15);   color:#ff4560; }
-    .badge-open      { background:rgba(0,136,255,0.15);   color:#0088ff; }
-    .badge-closed    { background:rgba(150,150,150,0.15); color:#aaa; }
-    .type-deposit    { color:#00e090; font-weight:bold; }
-    .type-withdrawal { color:#ff4560; font-weight:bold; }
-    .type-adjustment { color:#d4af37; font-weight:bold; }
-    .type-referral   { color:#a78bfa; font-weight:bold; }
-
-    .empty   { text-align:center; padding:40px 20px; color:#555; font-size:13px; }
-    .loading { text-align:center; padding:30px; color:#aaa; font-size:13px; }
-
-    .form-wrap { max-width:460px; }
-    .form-group { margin-bottom:14px; }
-    .form-group label { display:block; font-size:11px; color:#aaa; margin-bottom:5px; }
-    .form-group input, .form-group select, .form-group textarea { width:100%; padding:9px 12px; background:#0a0e27; border:1px solid #333; color:#fff; border-radius:5px; font-size:13px; }
-    .form-group input:focus, .form-group select:focus { outline:none; border-color:#d4af37; }
-    .method-tabs { display:flex; gap:8px; margin-bottom:18px; }
-    .method-tab { flex:1; text-align:center; padding:10px; background:#0a0e27; border:1px solid #333; border-radius:6px; cursor:pointer; font-size:12px; color:#aaa; }
-    .method-tab.active { border-color:#d4af37; color:#d4af37; font-weight:bold; background:rgba(212,175,55,0.08); }
-    .method-panel { display:none; }
-    .method-panel.show { display:block; }
-    .alert { padding:10px 14px; border-radius:5px; margin-bottom:14px; font-size:12px; display:none; }
-    .alert.show { display:block; }
-    .alert-success { background:rgba(0,224,144,0.1); border:1px solid #00e090; color:#00e090; }
-    .alert-error   { background:rgba(255,69,96,0.1);  border:1px solid #ff4560; color:#ff4560; }
-    .wallet-box { background:#0a0e27; border:1px solid #2a2f4a; border-radius:6px; padding:14px; margin-bottom:14px; font-size:12px; line-height:1.8; word-break:break-all; }
-    .wallet-box .addr { font-family:monospace; color:#d4af37; }
-    .stk-waiting { text-align:center; padding:30px 10px; display:none; }
-    .stk-waiting.show { display:block; }
-    .spinner { width:36px; height:36px; border:3px solid #333; border-top-color:#d4af37; border-radius:50%; margin:0 auto 14px; animation:spin 0.8s linear infinite; }
-    @keyframes spin { to { transform:rotate(360deg); } }
-
-    .ref-code-box { background:#0a0e27; border:1px solid #d4af37; border-radius:6px; padding:14px 18px; display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px; }
-    .ref-code-box .code { font-family:monospace; font-size:18px; color:#d4af37; font-weight:bold; letter-spacing:1px; }
-
-    .ref-link-box { background:#0a0e27; border:1px solid #2a2f4a; border-radius:6px; padding:12px 16px; display:flex; align-items:center; gap:10px; margin-bottom:20px; flex-wrap:wrap; }
-    .ref-link-box .link-label { font-size:11px; color:#aaa; width:100%; margin-bottom:2px; }
-    .ref-link-input { flex:1; min-width:200px; background:transparent; border:none; color:#d4af37; font-family:monospace; font-size:12px; padding:4px 0; }
-    .ref-link-input:focus { outline:none; }
-
-    .notif-panel { position:fixed; top:60px; right:20px; width:320px; max-height:400px; overflow-y:auto; background:#1a1f3a; border:1px solid #d4af37; border-radius:8px; padding:14px; display:none; z-index:2000; box-shadow:0 10px 30px rgba(0,0,0,0.5); }
-    .notif-panel.show { display:block; }
-    .notif-item { padding:10px; border-bottom:1px solid #2a2f4a; font-size:12px; }
-    .notif-item:last-child { border-bottom:none; }
-    .notif-item .n-title { color:#d4af37; font-weight:bold; margin-bottom:3px; }
-    .notif-item .n-msg { color:#aaa; line-height:1.5; }
-    .notif-item .n-time { color:#555; font-size:10px; margin-top:4px; }
-    .notif-item.unread { background:rgba(212,175,55,0.05); }
-
-    @media(max-width:900px) { .stats{grid-template-columns:repeat(2,1fr);} .charts-row{grid-template-columns:1fr;} }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: Arial;
+      background: #0a0e27;
+      color: #fff;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .card {
+      background: #1a1f3a;
+      border: 1px solid #d4af37;
+      border-radius: 10px;
+      padding: 40px;
+      width: 100%;
+      max-width: 400px;
+      position: relative;
+    }
+    .admin-badge {
+      position: absolute;
+      top: -12px;
+      right: 24px;
+      background: #d4af37;
+      color: #0a0e27;
+      font-size: 10px;
+      font-weight: bold;
+      letter-spacing: 1px;
+      padding: 4px 10px;
+      border-radius: 20px;
+      text-transform: uppercase;
+    }
+    .logo { text-align: center; margin-bottom: 8px; font-size: 30px; color: #d4af37; font-weight: bold; }
+    .subtitle { text-align: center; margin-bottom: 30px; font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 1px; }
+    .form-group { margin-bottom: 15px; }
+    label { display: block; margin-bottom: 5px; font-size: 12px; color: #aaa; text-transform: uppercase; }
+    input {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #333;
+      background: #0a0e27;
+      color: #fff;
+      border-radius: 5px;
+    }
+    input:focus { outline: none; border-color: #d4af37; }
+    .btn {
+      width: 100%;
+      padding: 12px;
+      background: #d4af37;
+      color: #0a0e27;
+      border: none;
+      border-radius: 5px;
+      font-weight: bold;
+      cursor: pointer;
+      text-transform: uppercase;
+      margin-top: 10px;
+    }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .error {
+      background: #ff4560;
+      padding: 10px;
+      border-radius: 5px;
+      margin-bottom: 15px;
+      display: none;
+      font-size: 13px;
+    }
+    a { color: #d4af37; text-decoration: none; }
+    .back-link {
+      display: block;
+      text-align: center;
+      font-size: 12px;
+      margin-top: 18px;
+    }
+    .back-link a { color: #888; }
+    .back-link a:hover { color: #d4af37; }
   </style>
 </head>
 <body>
-
-<div class="navbar">
-  <div class="nav-brand">&#128176; SUMMIT WEALTH</div>
-  <div class="nav-right">
-    <span class="nav-user" id="navUserName">—</span>
-    <button class="bell-btn" onclick="toggleNotifPanel()">
-      &#128276;<span class="bell-dot" id="bellDot"></span>
-    </button>
-    <button class="btn btn-red" onclick="logout()">Logout</button>
+  <div class="card">
+    <div class="admin-badge">Admin</div>
+    <div class="logo">&#128176; SUMMIT</div>
+    <div class="subtitle">Administrator Access</div>
+    <div class="error" id="err"></div>
+    <div class="form-group">
+      <label>Email</label>
+      <input type="email" id="email" placeholder="admin@summitwealthfx.space" autofocus>
+    </div>
+    <div class="form-group">
+      <label>Password</label>
+      <input type="password" id="pass" placeholder="••••••••">
+    </div>
+    <button class="btn" id="loginBtn" onclick="login()">Sign In</button>
+    <p class="back-link"><a href="/">&larr; Back to client login</a></p>
   </div>
-</div>
+  <script>
+    async function login() {
+      const btn = document.getElementById('loginBtn');
+      const errEl = document.getElementById('err');
+      errEl.style.display = 'none';
+      btn.disabled = true;
+      btn.textContent = 'Signing In...';
 
-<div class="notif-panel" id="notifPanel">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-    <strong style="color:#d4af37;font-size:13px;">Notifications</strong>
-    <button class="btn-sm" style="background:#333;color:#aaa;" onclick="markAllRead()">Mark all read</button>
-  </div>
-  <div id="notifList" class="loading">Loading...</div>
-</div>
-
-<div style="max-width:1400px; margin:10px auto; padding:0 30px;">
-  <div class="alert alert-success" id="globalSuccess"></div>
-  <div class="alert alert-error"   id="globalError"></div>
-</div>
-
-<div class="container">
-
-  <!-- STATS -->
-  <div class="stats">
-    <div class="stat">
-      <div class="stat-label">Account Balance</div>
-      <div class="stat-val">$<span id="statBalance">0.00</span></div>
-      <div class="stat-sub">Available funds</div>
-    </div>
-    <div class="stat">
-      <div class="stat-label">Equity</div>
-      <div class="stat-val">$<span id="statEquity">0.00</span></div>
-      <div class="stat-sub">Total value</div>
-    </div>
-    <div class="stat">
-      <div class="stat-label">Total Deposited</div>
-      <div class="stat-val">$<span id="statDeposited">0.00</span></div>
-      <div class="stat-sub"><span id="statDaysTraded">0</span> days traded</div>
-    </div>
-    <div class="stat">
-      <div class="stat-label">Total Withdrawn</div>
-      <div class="stat-val">$<span id="statWithdrawn">0.00</span></div>
-      <div class="stat-sub">All time</div>
-    </div>
-    <div class="stat">
-      <div class="stat-label">Referral Earnings</div>
-      <div class="stat-val" style="color:#a78bfa;">$<span id="statRefEarned">0.00</span></div>
-      <div class="stat-sub"><span id="statRefCount">0</span> referrals &#8594;</div>
-    </div>
-  </div>
-
-  <!-- CHARTS -->
-  <div class="charts-row">
-    <div class="chart-card">
-      <h3>Live Price Chart</h3>
-      <div class="chart-subtitle">Real-time market data</div>
-      <div class="symbol-tabs" style="margin-bottom:10px;">
-        <button class="symbol-tab active" data-symbol="BTCUSDT" onclick="switchSymbol(this,'BTCUSDT')">BTC/USDT</button>
-        <button class="symbol-tab" data-symbol="ETHUSDT" onclick="switchSymbol(this,'ETHUSDT')">ETH/USDT</button>
-        <button class="symbol-tab" data-symbol="BNBUSDT" onclick="switchSymbol(this,'BNBUSDT')">BNB/USDT</button>
-      </div>
-      <div class="price-row">
-        <span class="price-val" id="livePriceVal">—</span>
-        <span class="price-chg up" id="livePriceChg">+0.00%</span>
-        <span class="price-stale" id="priceStale"></span>
-      </div>
-      <canvas id="priceChart" height="140"></canvas>
-    </div>
-    <div class="chart-card">
-      <h3>Profit / Loss</h3>
-      <div class="chart-subtitle">Running P&amp;L based on activity</div>
-      <div class="pl-val" id="plVal">$0.00</div>
-      <div class="pl-sub" id="plSub">Net —</div>
-      <canvas id="plChart" height="140"></canvas>
-    </div>
-  </div>
-
-  <div class="charts-row">
-    <div class="chart-card">
-      <h3>Balance Over Time</h3>
-      <div class="chart-subtitle">Account balance progression</div>
-      <canvas id="balanceChart" height="140"></canvas>
-    </div>
-    <div class="chart-card">
-      <h3>Deposits vs Withdrawals</h3>
-      <div class="chart-subtitle">Transaction summary by month</div>
-      <canvas id="txSummaryChart" height="140"></canvas>
-    </div>
-  </div>
-
-  <!-- TABS -->
-  <div class="tabs">
-    <button class="tab active" data-tab="deposit"      onclick="switchTab(this,'deposit')">&#8593; Deposit</button>
-    <button class="tab" data-tab="withdraw"     onclick="switchTab(this,'withdraw')">&#8595; Withdraw USDT</button>
-    <button class="tab" data-tab="transactions" onclick="switchTab(this,'transactions')">&#9776; Transactions</button>
-    <button class="tab" data-tab="trades"       onclick="switchTab(this,'trades')">&#9989; Trades</button>
-    <button class="tab" data-tab="referral"     onclick="switchTab(this,'referral')">&#128279; Referral</button>
-  </div>
-
-  <!-- DEPOSIT -->
-  <div id="deposit" class="tab-content show">
-    <div class="panel form-wrap">
-      <div class="panel-title">&#8593; Make a Deposit</div>
-      <div class="method-tabs">
-        <div class="method-tab active" data-method="MPESA" onclick="switchDepositMethod(this,'MPESA')">&#128247; M-Pesa</div>
-        <div class="method-tab" data-method="TRC20" onclick="switchDepositMethod(this,'TRC20')">USDT TRC20</div>
-        <div class="method-tab" data-method="BEP20" onclick="switchDepositMethod(this,'BEP20')">USDT BEP20</div>
-        <div class="method-tab" data-method="ERC20" onclick="switchDepositMethod(this,'ERC20')">USDT ERC20</div>
-      </div>
-
-      <div class="alert alert-success" id="depositSuccess"></div>
-      <div class="alert alert-error"   id="depositError"></div>
-
-      <!-- M-PESA PANEL -->
-      <div class="method-panel show" id="panel-MPESA">
-        <div class="form-group">
-          <label>M-Pesa Phone Number</label>
-          <input type="text" id="mpesaPhone" placeholder="07XX XXX XXX">
-        </div>
-        <div class="form-group">
-          <label>Amount (KES)</label>
-          <input type="number" id="mpesaAmount" placeholder="Minimum KES 12,952">
-        </div>
-        <button class="btn btn-gold" style="width:100%;padding:12px;" onclick="submitMpesaDeposit()">
-          &#128247; Send M-Pesa Prompt
-        </button>
-
-        <div class="stk-waiting" id="stkWaiting">
-          <div class="spinner"></div>
-          <div style="color:#d4af37;font-weight:bold;margin-bottom:4px;">Waiting for confirmation...</div>
-          <div style="color:#aaa;font-size:12px;">Check your phone and enter your M-Pesa PIN</div>
-        </div>
-      </div>
-
-      <!-- USDT MANUAL PANELS -->
-      <div class="method-panel" id="panel-TRC20">
-        <div class="wallet-box">
-          Send USDT (TRC20 network) to:<br>
-          <span class="addr" id="addrTRC20">Loading...</span>
-        </div>
-        <div class="form-group"><label>Amount Sent (USD)</label><input type="number" id="amtTRC20" placeholder="Minimum $100"></div>
-        <button class="btn btn-gold" style="width:100%;padding:12px;" onclick="submitManualDeposit('TRC20')">Submit Deposit</button>
-      </div>
-      <div class="method-panel" id="panel-BEP20">
-        <div class="wallet-box">
-          Send USDT (BEP20 network) to:<br>
-          <span class="addr" id="addrBEP20">Loading...</span>
-        </div>
-        <div class="form-group"><label>Amount Sent (USD)</label><input type="number" id="amtBEP20" placeholder="Minimum $100"></div>
-        <button class="btn btn-gold" style="width:100%;padding:12px;" onclick="submitManualDeposit('BEP20')">Submit Deposit</button>
-      </div>
-      <div class="method-panel" id="panel-ERC20">
-        <div class="wallet-box">
-          Send USDT (ERC20 network) to:<br>
-          <span class="addr" id="addrERC20">Loading...</span>
-        </div>
-        <div class="form-group"><label>Amount Sent (USD)</label><input type="number" id="amtERC20" placeholder="Minimum $100"></div>
-        <button class="btn btn-gold" style="width:100%;padding:12px;" onclick="submitManualDeposit('ERC20')">Submit Deposit</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- WITHDRAW -->
-  <div id="withdraw" class="tab-content">
-    <div class="panel form-wrap">
-      <div class="panel-title">&#8595; Withdraw USDT</div>
-      <div class="alert alert-success" id="wdrSuccess"></div>
-      <div class="alert alert-error"   id="wdrError"></div>
-      <div class="form-group">
-        <label>Amount (USD)</label>
-        <input type="number" id="wdrAmount" placeholder="Minimum $10">
-      </div>
-      <div class="form-group">
-        <label>Network</label>
-        <select id="wdrNetwork">
-          <option value="TRC20">USDT — TRC20</option>
-          <option value="BEP20">USDT — BEP20</option>
-          <option value="ERC20">USDT — ERC20</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label>Wallet Address</label>
-        <input type="text" id="wdrAddress" placeholder="Your USDT wallet address">
-      </div>
-      <div class="form-group">
-        <label>PIN</label>
-        <input type="password" id="wdrPin" placeholder="6-digit PIN" maxlength="6">
-      </div>
-      <button class="btn btn-gold" style="width:100%;padding:12px;" onclick="submitWithdraw()">Submit Withdrawal</button>
-    </div>
-  </div>
-
-  <!-- TRANSACTIONS -->
-  <div id="transactions" class="tab-content">
-    <div class="panel">
-      <div class="panel-title">&#9776; My Transactions</div>
-      <div id="txList" class="loading">Loading...</div>
-    </div>
-  </div>
-
-  <!-- TRADES -->
-  <div id="trades" class="tab-content">
-    <div class="panel">
-      <div class="panel-title">&#9989; My Trades</div>
-      <div id="tradeList" class="loading">Loading...</div>
-    </div>
-  </div>
-
-  <!-- REFERRAL -->
-  <div id="referral" class="tab-content">
-    <div class="panel">
-      <div class="panel-title">&#128279; Referral Program</div>
-      <p style="color:#aaa;font-size:12px;margin-bottom:16px;">
-        Earn 16% commission when someone you refer makes a deposit of $100 or more.
-      </p>
-      <div class="ref-code-box">
-        <div>
-          <div style="font-size:11px;color:#aaa;margin-bottom:4px;">Your referral code</div>
-          <div class="code" id="refCodeVal">—</div>
-        </div>
-        <button class="btn-sm btn-gold" onclick="copyRefCode()">&#128203; Copy</button>
-      </div>
-
-      <div class="ref-link-box">
-        <div class="link-label">Your referral link</div>
-        <input type="text" class="ref-link-input" id="refLinkVal" value="—" readonly onclick="this.select()">
-        <button class="btn-sm btn-gold" onclick="copyRefLink()">&#128203; Copy Link</button>
-      </div>
-
-      <div class="alert alert-success" id="refSuccess"></div>
-      <div class="alert alert-error"   id="refError"></div>
-
-      <div class="form-wrap" style="margin-bottom:24px;">
-        <div class="panel-title" style="font-size:13px;">Withdraw Referral Earnings</div>
-        <div class="form-group"><label>Network</label>
-          <select id="refWdrNetwork">
-            <option value="TRC20">USDT — TRC20</option>
-            <option value="BEP20">USDT — BEP20</option>
-            <option value="ERC20">USDT — ERC20</option>
-          </select>
-        </div>
-        <div class="form-group"><label>Wallet Address</label><input type="text" id="refWdrAddress" placeholder="Your USDT wallet address"></div>
-        <div class="form-group"><label>PIN</label><input type="password" id="refWdrPin" placeholder="6-digit PIN" maxlength="6"></div>
-        <button class="btn btn-gold" style="width:100%;padding:10px;" onclick="submitRefWithdraw()">Withdraw (Min $16)</button>
-      </div>
-
-      <div class="panel-title" style="font-size:13px;">Referral History</div>
-      <div id="referralList" class="loading">Loading...</div>
-    </div>
-  </div>
-
-</div>
-
-<script>
-const api  = (url,opts={}) => fetch(url,{credentials:'same-origin',...opts}).then(r=>r.json());
-const post = (u,b) => api(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
-const fmt  = n => parseFloat(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
-const fmtD = n => '$' + fmt(n);
-
-function escHtml(s) {
-  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-
-let priceChart, plChart, balanceChart, txSummaryChart;
-let currentSymbol = 'BTCUSDT';
-let priceHistory = { BTCUSDT: [], ETHUSDT: [], BNBUSDT: [] };
-let stkPollTimer = null;
-let priceFetchFailCount = 0;
-
-// ── ALERTS ────────────────────────────────────────────────────────────────────
-function showSuccess(msg, id='globalSuccess') {
-  const el = document.getElementById(id);
-  el.textContent = '✓ ' + msg;
-  el.classList.add('show');
-  setTimeout(() => el.classList.remove('show'), 4000);
-}
-function showError(msg, id='globalError') {
-  const el = document.getElementById(id);
-  el.textContent = '✗ ' + msg;
-  el.classList.add('show');
-  setTimeout(() => el.classList.remove('show'), 5000);
-}
-
-// ── LOGOUT ────────────────────────────────────────────────────────────────────
-async function logout() {
-  await post('/api/auth/logout', {});
-  window.location.href = '/';
-}
-
-// ── TABS ──────────────────────────────────────────────────────────────────────
-function switchTab(btn, name) {
-  document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('show'));
-  document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
-  document.getElementById(name).classList.add('show');
-  btn.classList.add('active');
-  if (name === 'transactions') loadTransactions();
-  if (name === 'trades')       loadTrades();
-  if (name === 'referral')     loadReferrals();
-}
-
-function switchDepositMethod(el, method) {
-  document.querySelectorAll('.method-tab').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.method-panel').forEach(p => p.classList.remove('show'));
-  el.classList.add('active');
-  document.getElementById('panel-' + method).classList.add('show');
-  document.getElementById('depositSuccess').classList.remove('show');
-  document.getElementById('depositError').classList.remove('show');
-  if (method !== 'MPESA') loadWalletAddress(method);
-}
-
-// ── SUMMARY / STATS ───────────────────────────────────────────────────────────
-async function loadSummary() {
-  const d = await api('/api/client/summary');
-  if (!d.success) { window.location.href = '/'; return; }
-  const s = d.data;
-
-  document.getElementById('navUserName').textContent = s.name || '';
-  document.getElementById('statBalance').textContent    = fmt(s.balance);
-  document.getElementById('statEquity').textContent     = fmt(s.equity);
-  document.getElementById('statDeposited').textContent  = fmt(s.total_deposits);
-  document.getElementById('statWithdrawn').textContent  = fmt(s.total_withdrawals);
-  document.getElementById('statRefEarned').textContent  = fmt(s.ref_earned);
-  document.getElementById('statRefCount').textContent   = s.ref_count || 0;
-  document.getElementById('statDaysTraded').textContent = s.days_traded || 0;
-  document.getElementById('refCodeVal').textContent     = s.ref_code || '—';
-
-  const refLinkEl = document.getElementById('refLinkVal');
-  if (s.ref_code) {
-    refLinkEl.value = window.location.origin + '/register?ref=' + encodeURIComponent(s.ref_code);
-  } else {
-    refLinkEl.value = '—';
-  }
-
-  const netColor = (s.total_profit || 0) >= 0 ? '#00e090' : '#ff4560';
-  const plEl = document.getElementById('plVal');
-  plEl.textContent = (s.total_profit >= 0 ? '+' : '') + fmtD(s.total_profit);
-  plEl.style.color = netColor;
-  const plSub = document.getElementById('plSub');
-  plSub.textContent = (s.total_profit >= 0 ? 'Net positive' : 'Net negative');
-  plSub.className = 'pl-sub ' + (s.total_profit >= 0 ? 'pos' : 'neg');
-
-  return s;
-}
-
-// ── NOTIFICATIONS ─────────────────────────────────────────────────────────────
-async function loadNotifCount() {
-  const d = await api('/api/client/notifications');
-  if (!d.success) return;
-  document.getElementById('bellDot').classList.toggle('show', d.data.unread_count > 0);
-}
-
-async function toggleNotifPanel() {
-  const panel = document.getElementById('notifPanel');
-  panel.classList.toggle('show');
-  if (!panel.classList.contains('show')) return;
-
-  setHTML('notifList', '<div class="loading">Loading...</div>');
-  const d = await api('/api/client/notifications');
-  if (!d.success) { setHTML('notifList', '<div class="empty">Failed to load</div>'); return; }
-  if (!d.data.notifications.length) { setHTML('notifList', '<div class="empty">No notifications yet.</div>'); return; }
-
-  let html = '';
-  d.data.notifications.forEach(n => {
-    html += `<div class="notif-item ${!n.read_at ? 'unread' : ''}">
-      <div class="n-title">${escHtml(n.title)}</div>
-      <div class="n-msg">${escHtml(n.message)}</div>
-      <div class="n-time">${(n.created_at || '').substring(0,16).replace('T',' ')}</div>
-    </div>`;
-  });
-  setHTML('notifList', html);
-}
-
-async function markAllRead() {
-  await post('/api/client/notifications/read-all', {});
-  document.getElementById('bellDot').classList.remove('show');
-  toggleNotifPanel();
-  toggleNotifPanel();
-}
-
-document.addEventListener('click', e => {
-  const panel = document.getElementById('notifPanel');
-  if (panel.classList.contains('show') && !panel.contains(e.target) && !e.target.closest('.bell-btn')) {
-    panel.classList.remove('show');
-  }
-});
-
-function setHTML(el, html) {
-  if (typeof el === 'string') el = document.getElementById(el);
-  if (el && el.innerHTML !== html) el.innerHTML = html;
-}
-
-// ── DEPOSIT: WALLET ADDRESS ───────────────────────────────────────────────────
-async function loadWalletAddress(network) {
-  const el = document.getElementById('addr' + network);
-  if (el.textContent !== 'Loading...' && el.textContent !== '') return;
-  const d = await api('/api/client/deposit/address?network=' + network);
-  if (!d.success) { el.textContent = 'Not configured — contact support'; return; }
-  el.textContent = d.data.address;
-}
-
-async function submitManualDeposit(network) {
-  const amt = parseFloat(document.getElementById('amt' + network).value || 0);
-  const addr = document.getElementById('addr' + network).textContent;
-  if (!amt || amt < 100) { showError('Minimum deposit is $100', 'depositError'); return; }
-  const d = await post('/api/client/deposit/pending', { amount: amt, network, address: addr });
-  if (!d.success) { showError(d.error, 'depositError'); return; }
-  showSuccess(d.data.message, 'depositSuccess');
-  document.getElementById('amt' + network).value = '';
-  await refreshAll();
-}
-
-// ── DEPOSIT: M-PESA STK PUSH ──────────────────────────────────────────────────
-async function submitMpesaDeposit() {
-  const phone  = document.getElementById('mpesaPhone').value.trim();
-  const amount = parseFloat(document.getElementById('mpesaAmount').value || 0);
-  if (!phone) { showError('Enter your M-Pesa phone number', 'depositError'); return; }
-  if (!amount || amount < 12952.2169) { showError('Minimum deposit is KES 12,952.22', 'depositError'); return; }
-
-  const d = await post('/api/client/mpesa/stk-push', { phone_number: phone, amount });
-  if (!d.success) { showError(d.error, 'depositError'); return; }
-
-  showSuccess(d.data.message, 'depositSuccess');
-  document.getElementById('stkWaiting').classList.add('show');
-  pollMpesaStatus(d.data.checkout_request_id);
-}
-
-function pollMpesaStatus(checkoutId) {
-  if (stkPollTimer) clearInterval(stkPollTimer);
-  stkPollTimer = setInterval(async () => {
-    const d = await api('/api/client/mpesa/status?checkout_request_id=' + encodeURIComponent(checkoutId));
-    if (!d.success) return;
-    if (d.data.status === 'COMPLETED') {
-      clearInterval(stkPollTimer);
-      document.getElementById('stkWaiting').classList.remove('show');
-      showSuccess(`Deposit of $${fmt(d.data.amount)} confirmed!`, 'depositSuccess');
-      document.getElementById('mpesaPhone').value = '';
-      document.getElementById('mpesaAmount').value = '';
-      refreshAll();
-    } else if (d.data.status === 'REJECTED') {
-      clearInterval(stkPollTimer);
-      document.getElementById('stkWaiting').classList.remove('show');
-      showError(d.data.message || 'M-Pesa payment failed or was cancelled', 'depositError');
+      try {
+        const r = await fetch('/api/auth/login', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: document.getElementById('email').value,
+            password: document.getElementById('pass').value,
+            admin: true
+          })
+        });
+        const d = await r.json();
+        if (d.success) {
+          window.location = d.data.redirect;
+        } else {
+          errEl.textContent = d.error;
+          errEl.style.display = 'block';
+        }
+      } catch (e) {
+        errEl.textContent = 'Network error — please try again.';
+        errEl.style.display = 'block';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Sign In';
+      }
     }
-  }, 5000);
-}
-
-// ── WITHDRAW ──────────────────────────────────────────────────────────────────
-async function submitWithdraw() {
-  const amount  = parseFloat(document.getElementById('wdrAmount').value || 0);
-  const network = document.getElementById('wdrNetwork').value;
-  const address = document.getElementById('wdrAddress').value.trim();
-  const pin     = document.getElementById('wdrPin').value.trim();
-
-  if (!amount || amount < 10) { showError('Minimum withdrawal is $10', 'wdrError'); return; }
-  if (!address) { showError('Enter your wallet address', 'wdrError'); return; }
-  if (!pin)     { showError('Enter your PIN', 'wdrError'); return; }
-
-  const d = await post('/api/client/withdraw', { amount, network, address, pin });
-  if (!d.success) { showError(d.error, 'wdrError'); return; }
-  showSuccess(d.data.message, 'wdrSuccess');
-  document.getElementById('wdrAmount').value = '';
-  document.getElementById('wdrAddress').value = '';
-  document.getElementById('wdrPin').value = '';
-  await refreshAll();
-}
-
-// ── REFERRAL ──────────────────────────────────────────────────────────────────
-function copyRefCode() {
-  const code = document.getElementById('refCodeVal').textContent;
-  navigator.clipboard.writeText(code).then(() => showSuccess('Referral code copied!', 'refSuccess'));
-}
-
-function copyRefLink() {
-  const linkEl = document.getElementById('refLinkVal');
-  const link = linkEl.value;
-  if (!link || link === '—') return;
-  navigator.clipboard.writeText(link).then(() => showSuccess('Referral link copied!', 'refSuccess'));
-}
-
-async function submitRefWithdraw() {
-  const network = document.getElementById('refWdrNetwork').value;
-  const address = document.getElementById('refWdrAddress').value.trim();
-  const pin     = document.getElementById('refWdrPin').value.trim();
-  if (!address) { showError('Enter your wallet address', 'refError'); return; }
-  if (!pin)     { showError('Enter your PIN', 'refError'); return; }
-
-  const d = await post('/api/client/referral/withdraw', { network, address, pin });
-  if (!d.success) { showError(d.error, 'refError'); return; }
-  showSuccess(d.data.message, 'refSuccess');
-  document.getElementById('refWdrAddress').value = '';
-  document.getElementById('refWdrPin').value = '';
-  await refreshAll();
-}
-
-async function loadReferrals() {
-  setHTML('referralList', '<div class="loading">Loading...</div>');
-  const d = await api('/api/client/referrals');
-  if (!d.success) { showError('Failed to load referrals'); return; }
-  if (!d.data.length) { setHTML('referralList', '<div class="empty">No referrals yet. Share your code to start earning!</div>'); return; }
-  let html = '<table class="tbl"><thead><tr><th>Date</th><th>Referred User</th><th>Commission</th><th>Status</th></tr></thead><tbody>';
-  d.data.forEach(r => {
-    html += `<tr>
-      <td style="color:#aaa;font-size:11px;">${(r.created_at || '').substring(0,10)}</td>
-      <td><div style="font-weight:bold;">${escHtml(r.referred_name || '—')}</div><div style="font-size:10px;color:#555;">${escHtml(r.referred_email || '')}</div></td>
-      <td style="color:#00e090;font-weight:bold;">$${fmt(r.commission_usd)}</td>
-      <td><span class="badge badge-completed">${r.status}</span></td>
-    </tr>`;
-  });
-  html += '</tbody></table>';
-  setHTML('referralList', html);
-}
-
-// ── TRANSACTIONS ──────────────────────────────────────────────────────────────
-async function loadTransactions() {
-  setHTML('txList', '<div class="loading">Loading...</div>');
-  const d = await api('/api/client/transactions');
-  if (!d.success) { showError('Failed to load transactions'); return; }
-  if (!d.data.length) { setHTML('txList', '<div class="empty">No transactions yet.</div>'); return; }
-
-  let html = '<table class="tbl"><thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Method</th><th>Status</th><th>Reference</th></tr></thead><tbody>';
-  d.data.forEach(t => {
-    const tc = t.type === 'DEPOSIT' ? 'type-deposit'
-             : t.type === 'WITHDRAWAL' ? 'type-withdrawal'
-             : t.type === 'REFERRAL_WITHDRAWAL' ? 'type-referral'
-             : 'type-adjustment';
-    const bc = t.status === 'COMPLETED' ? 'badge-completed'
-             : t.status === 'PENDING'   ? 'badge-pending'
-             : 'badge-rejected';
-    html += `<tr>
-      <td style="color:#aaa;font-size:11px;">${(t.created_at || '').substring(0,16).replace('T',' ')}</td>
-      <td class="${tc}">${(t.type || '').replace(/_/g,' ')}</td>
-      <td style="font-weight:bold;">$${fmt(t.amount_usd)}</td>
-      <td>${escHtml(t.method || '—')}</td>
-      <td><span class="badge ${bc}">${t.status}</span></td>
-      <td style="color:#555;font-size:11px;">${escHtml(t.reference || '—')}</td>
-    </tr>`;
-  });
-  html += '</tbody></table>';
-  setHTML('txList', html);
-}
-
-// ── TRADES ────────────────────────────────────────────────────────────────────
-async function loadTrades() {
-  setHTML('tradeList', '<div class="loading">Loading...</div>');
-  const d = await api('/api/client/trades');
-  if (!d.success) { showError('Failed to load trades'); return; }
-  if (!d.data.length) { setHTML('tradeList', '<div class="empty">No trades yet.</div>'); return; }
-
-  let html = '<table class="tbl"><thead><tr><th>Opened</th><th>Symbol</th><th>Direction</th><th>Entry</th><th>Close</th><th>Quantity</th><th>P&amp;L</th><th>Status</th><th>Close Reason</th></tr></thead><tbody>';
-  d.data.forEach(t => {
-    const pnlColor = (t.pnl || 0) >= 0 ? '#00e090' : '#ff4560';
-    const dirColor = t.direction === 'BUY' ? '#00e090' : '#ff4560';
-    html += `<tr>
-      <td style="color:#aaa;font-size:11px;">${(t.opened_at || '').substring(0,16).replace('T',' ')}</td>
-      <td style="color:#d4af37;font-weight:bold;">${escHtml(t.symbol || '—')}</td>
-      <td style="color:${dirColor};font-weight:bold;">${escHtml(t.direction || '—')}</td>
-      <td>$${fmt(t.entry_price)}</td>
-      <td>${t.close_price ? '$' + fmt(t.close_price) : '<span style="color:#555">Open</span>'}</td>
-      <td>${t.quantity != null ? t.quantity : '—'}</td>
-      <td style="color:${pnlColor};font-weight:bold;">${t.pnl != null ? (t.pnl >= 0 ? '+' : '') + fmt(t.pnl) : '—'}</td>
-      <td><span class="badge ${t.status === 'OPEN' ? 'badge-open' : 'badge-closed'}">${t.status}</span></td>
-      <td style="color:#555;font-size:11px;">${escHtml(t.close_reason || '—')}</td>
-    </tr>`;
-  });
-  html += '</tbody></table>';
-  setHTML('tradeList', html);
-}
-
-// ── PROFIT HISTORY → BALANCE OVER TIME + DEPOSITS/WITHDRAWALS CHART ─────────
-async function loadHistoryCharts() {
-  const [profitRes, txRes, summary] = await Promise.all([
-    api('/api/client/profit/history'),
-    api('/api/client/transactions'),
-    loadSummary()
-  ]);
-
-  Chart.defaults.color = '#666';
-  Chart.defaults.borderColor = '#1e2440';
-
-  // Balance over time — reconstruct from transactions + profit log chronologically
-  const events = [];
-  if (txRes.success) {
-    txRes.data.filter(t => t.status === 'COMPLETED').forEach(t => {
-      let delta = 0;
-      if (t.type === 'DEPOSIT') delta = t.amount_usd;
-      else if (t.type === 'WITHDRAWAL') delta = -t.amount_usd;
-      else if (t.type === 'ADJUSTMENT') delta = t.amount_usd; // approximation
-      if (delta !== 0) events.push({ date: (t.created_at || '').substring(0,10), delta });
-    });
-  }
-  if (profitRes.success) {
-    profitRes.data.forEach(p => events.push({ date: p.date, delta: p.profit }));
-  }
-  events.sort((a,b) => a.date.localeCompare(b.date));
-
-  let running = 0;
-  const balLabels = [], balData = [];
-  events.forEach(e => {
-    running += e.delta;
-    balLabels.push(e.date);
-    balData.push(Math.round(running * 100) / 100);
-  });
-  if (!balLabels.length) { balLabels.push('Now'); balData.push(summary ? summary.balance : 0); }
-  else if (summary) { balLabels.push('Now'); balData.push(summary.balance); }
-
-  if (balanceChart) balanceChart.destroy();
-  balanceChart = new Chart(document.getElementById('balanceChart').getContext('2d'), {
-    type: 'line',
-    data: { labels: balLabels, datasets: [{ data: balData, borderColor: '#d4af37', backgroundColor: 'rgba(212,175,55,0.08)', borderWidth: 2, pointRadius: 3, pointBackgroundColor: '#d4af37', fill: true, tension: 0.35 }] },
-    options: {
-      responsive: true, animation: false,
-      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => '$' + fmt(c.parsed.y) } } },
-      scales: { x: { ticks: { font: { size: 9 }, maxTicksLimit: 6 }, grid: { color: '#1e2440' } }, y: { ticks: { callback: v => '$' + fmt(v), font: { size: 9 } }, grid: { color: '#1e2440' } } }
-    }
-  });
-
-  // Deposits vs Withdrawals by month
-  const months = {};
-  if (txRes.success) {
-    txRes.data.filter(t => t.status === 'COMPLETED').forEach(t => {
-      const mo = (t.created_at || '').substring(0,7);
-      if (!mo) return;
-      if (!months[mo]) months[mo] = { dep: 0, wdr: 0 };
-      if (t.type === 'DEPOSIT') months[mo].dep += t.amount_usd;
-      if (t.type === 'WITHDRAWAL' || t.type === 'REFERRAL_WITHDRAWAL') months[mo].wdr += t.amount_usd;
-    });
-  }
-  const moLabels = Object.keys(months).sort();
-  if (!moLabels.length) { moLabels.push(new Date().toISOString().substring(0,7)); months[moLabels[0]] = { dep:0, wdr:0 }; }
-
-  if (txSummaryChart) txSummaryChart.destroy();
-  txSummaryChart = new Chart(document.getElementById('txSummaryChart').getContext('2d'), {
-    type: 'bar',
-    data: {
-      labels: moLabels,
-      datasets: [
-        { label: 'Deposits',    data: moLabels.map(m => months[m].dep), backgroundColor: 'rgba(0,224,144,0.7)', borderRadius: 4 },
-        { label: 'Withdrawals', data: moLabels.map(m => months[m].wdr), backgroundColor: 'rgba(255,69,96,0.7)',  borderRadius: 4 },
-      ]
-    },
-    options: {
-      responsive: true, animation: false,
-      plugins: { legend: { labels: { color: '#aaa', font: { size: 11 }, boxWidth: 12 } }, tooltip: { callbacks: { label: c => '$' + fmt(c.parsed.y) } } },
-      scales: { x: { ticks: { font: { size: 9 } }, grid: { color: '#1e2440' } }, y: { ticks: { callback: v => '$' + fmt(v), font: { size: 9 } }, grid: { color: '#1e2440' } } }
-    }
-  });
-
-  // P&L chart — cumulative daily profit
-  let cum = 0;
-  const plLabels = [], plData = [];
-  if (profitRes.success) {
-    const sorted = [...profitRes.data].sort((a,b) => a.date.localeCompare(b.date));
-    sorted.forEach(p => { cum += p.profit; plLabels.push(p.date); plData.push(Math.round(cum*100)/100); });
-  }
-  if (!plLabels.length) { plLabels.push('Start'); plData.push(0); }
-
-  if (plChart) plChart.destroy();
-  const plColor = cum >= 0 ? '#00e090' : '#ff4560';
-  plChart = new Chart(document.getElementById('plChart').getContext('2d'), {
-    type: 'line',
-    data: { labels: plLabels, datasets: [{ data: plData, borderColor: plColor, backgroundColor: plColor + '22', borderWidth: 2, pointRadius: 3, pointBackgroundColor: plColor, fill: true, tension: 0.35 }] },
-    options: {
-      responsive: true, animation: false,
-      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => '$' + fmt(c.parsed.y) } } },
-      scales: { x: { ticks: { font: { size: 9 }, maxTicksLimit: 6 }, grid: { color: '#1e2440' } }, y: { ticks: { callback: v => '$' + fmt(v), font: { size: 9 } }, grid: { color: '#1e2440' } } }
-    }
-  });
-}
-
-// ── LIVE PRICE (real market data via Binance public REST API) ───────────────
-// Binance's ticker/price and klines endpoints are CORS-enabled, so they can
-// be called directly from the browser without a backend proxy. If your
-// deployment environment blocks outbound calls to Binance, swap the fetch
-// URLs below for a proxy route on your own backend instead.
-async function fetchBinancePrice(symbol) {
-  try {
-    const res = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`);
-    if (!res.ok) throw new Error('bad response');
-    const data = await res.json();
-    return parseFloat(data.price);
-  } catch (e) {
-    console.error('Live price fetch failed', e);
-    return null;
-  }
-}
-
-async function fetchBinanceHistory(symbol) {
-  try {
-    const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1m&limit=30`);
-    if (!res.ok) throw new Error('bad response');
-    const data = await res.json();
-    // kline format: [openTime, open, high, low, close, volume, ...] — use close price
-    return data.map(k => parseFloat(k[4])).filter(v => !isNaN(v));
-  } catch (e) {
-    console.error('Price history fetch failed', e);
-    return [];
-  }
-}
-
-async function pollLivePrice() {
-  const price = await fetchBinancePrice(currentSymbol);
-  const staleEl = document.getElementById('priceStale');
-
-  if (!price) {
-    priceFetchFailCount++;
-    if (priceFetchFailCount >= 2) {
-      staleEl.textContent = '⚠ price feed unavailable';
-    }
-    return;
-  }
-  priceFetchFailCount = 0;
-  staleEl.textContent = '';
-
-  const hist = priceHistory[currentSymbol];
-  hist.push(price);
-  if (hist.length > 30) hist.shift();
-
-  document.getElementById('livePriceVal').textContent = '$' + fmt(price);
-  if (hist.length > 1) {
-    const chg = ((price - hist[0]) / hist[0]) * 100;
-    const chgEl = document.getElementById('livePriceChg');
-    chgEl.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
-    chgEl.className = 'price-chg ' + (chg >= 0 ? 'up' : 'down');
-  }
-
-  Chart.defaults.color = '#666';
-  if (priceChart) priceChart.destroy();
-  priceChart = new Chart(document.getElementById('priceChart').getContext('2d'), {
-    type: 'line',
-    data: {
-      labels: hist.map((_,i) => i),
-      datasets: [{ data: hist, borderColor: '#d4af37', backgroundColor: 'rgba(212,175,55,0.08)', borderWidth: 2, pointRadius: 0, fill: true, tension: 0.35 }]
-    },
-    options: {
-      responsive: true, animation: false,
-      plugins: { legend: { display: false }, tooltip: { enabled: false } },
-      scales: { x: { display: false }, y: { ticks: { callback: v => '$' + fmt(v), font: { size: 9 } }, grid: { color: '#1e2440' } } }
-    }
-  });
-}
-
-async function switchSymbol(el, symbol) {
-  document.querySelectorAll('.symbol-tab').forEach(t => t.classList.remove('active'));
-  el.classList.add('active');
-  currentSymbol = symbol;
-
-  // Seed with real recent history so the chart isn't flat/empty right after switching
-  if (!priceHistory[symbol] || !priceHistory[symbol].length) {
-    priceHistory[symbol] = await fetchBinanceHistory(symbol);
-  }
-  pollLivePrice();
-}
-
-// ── REFRESH / INIT ────────────────────────────────────────────────────────────
-async function refreshAll() {
-  await loadSummary();
-  await loadHistoryCharts();
-  await loadNotifCount();
-}
-
-async function init() {
-  await loadSummary();
-  await loadHistoryCharts();
-  await loadNotifCount();
-
-  // Seed live price chart with real recent history, then start ticking
-  priceHistory[currentSymbol] = await fetchBinanceHistory(currentSymbol);
-  await pollLivePrice();
-  setInterval(pollLivePrice, 15000);
-  setInterval(refreshAll, 60000);
-}
-
-init();
-</script>
+    document.addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
+  </script>
 </body>
 </html>

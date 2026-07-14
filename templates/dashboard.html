@@ -810,24 +810,49 @@ function buildSymbolPricePoints(symbol) {
     });
 }
 
+// Compute a tight y-axis range around the actual data so sparse trades (or
+// several trades at the same price) still render as a visible, readable
+// line/point instead of getting lost inside Chart.js's default auto-range
+// (which was stretching a flat/near-flat price out to a huge $64k–$72k
+// window, making it look "stagnant" even when it was rendering correctly).
+function computeYRange(data) {
+  if (!data.length) return { min: undefined, max: undefined };
+  const lo = Math.min(...data);
+  const hi = Math.max(...data);
+  if (lo === hi) {
+    // Single price (or every trade at the same price) — pad by 2% of the
+    // price itself so there's a visible band around the point.
+    const pad = Math.max(lo * 0.02, 1);
+    return { min: lo - pad, max: hi + pad };
+  }
+  // Real spread — add 15% headroom on each side so the line has room to
+  // breathe instead of hugging the top/bottom edge of the chart.
+  const pad = (hi - lo) * 0.15;
+  return { min: lo - pad, max: hi + pad };
+}
+
 function renderLivePriceChart(points) {
   const ctx = document.getElementById('priceChart').getContext('2d');
   Chart.defaults.color = '#666';
 
   const labels = points.map(p => p.label);
   const data = points.map(p => p.price);
+  const { min: yMin, max: yMax } = computeYRange(data);
 
   if (!priceChart) {
     priceChart = new Chart(ctx, {
       type: 'line',
       data: {
         labels,
-        datasets: [{ data, borderColor: '#d4af37', backgroundColor: 'rgba(212,175,55,0.08)', borderWidth: 2, pointRadius: points.length <= 30 ? 2 : 0, pointBackgroundColor: '#d4af37', fill: true, tension: 0.35 }]
+        datasets: [{ data, borderColor: '#d4af37', backgroundColor: 'rgba(212,175,55,0.08)', borderWidth: 2, pointRadius: points.length ? (points.length <= 30 ? 3 : 0) : 0, pointBackgroundColor: '#d4af37', fill: true, tension: 0.3 }]
       },
       options: {
         responsive: true, animation: false,
         plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => '$' + fmt(c.parsed.y) } } },
-        scales: { x: { display: false }, y: { ticks: { callback: v => '$' + fmt(v), font: { size: 9 } }, grid: { color: '#1e2440' } } }
+        scales: {
+          x: { display: points.length > 1, ticks: { font: { size: 9 }, maxTicksLimit: 6 }, grid: { display: false } },
+          y: { min: yMin, max: yMax, ticks: { callback: v => '$' + fmt(v), font: { size: 9 } }, grid: { color: '#1e2440' } }
+        }
       }
     });
     return;
@@ -836,7 +861,10 @@ function renderLivePriceChart(points) {
   // Update existing chart in place instead of destroy/recreate — avoids flicker.
   priceChart.data.labels = labels;
   priceChart.data.datasets[0].data = data;
-  priceChart.data.datasets[0].pointRadius = points.length <= 30 ? 2 : 0;
+  priceChart.data.datasets[0].pointRadius = points.length ? (points.length <= 30 ? 3 : 0) : 0;
+  priceChart.options.scales.y.min = yMin;
+  priceChart.options.scales.y.max = yMax;
+  priceChart.options.scales.x.display = points.length > 1;
   priceChart.update('none'); // 'none' = no re-animation flash, just redraw the line
 }
 

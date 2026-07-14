@@ -784,6 +784,37 @@ async function loadHistoryCharts() {
 // ── LIVE PRICE (polling — no public price API wired here beyond summary, so
 //    this uses a lightweight self-poll of the trades/summary endpoints;
 //    swap in a real market-data feed if you want tick-level updates) ────────
+//
+// FIX: previously this destroyed and recreated the Chart.js instance on every
+// poll (every 15s), causing a visible flicker/flash. Now it creates the chart
+// once per symbol and just pushes new data into the existing instance via
+// .update(), which animates smoothly instead of flashing.
+function renderLivePriceChart(hist) {
+  const ctx = document.getElementById('priceChart').getContext('2d');
+  Chart.defaults.color = '#666';
+
+  if (!priceChart) {
+    priceChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: hist.map((_, i) => i),
+        datasets: [{ data: hist.slice(), borderColor: '#d4af37', backgroundColor: 'rgba(212,175,55,0.08)', borderWidth: 2, pointRadius: 0, fill: true, tension: 0.35 }]
+      },
+      options: {
+        responsive: true, animation: false,
+        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+        scales: { x: { display: false }, y: { ticks: { callback: v => '$' + fmt(v), font: { size: 9 } }, grid: { color: '#1e2440' } } }
+      }
+    });
+    return;
+  }
+
+  // Update existing chart in place instead of destroy/recreate
+  priceChart.data.labels = hist.map((_, i) => i);
+  priceChart.data.datasets[0].data = hist.slice();
+  priceChart.update('none'); // 'none' = no re-animation flash, just redraw the line
+}
+
 async function pollLivePrice() {
   // Uses the most recent trade's entry_price as a stand-in "live" reference
   // point per symbol, refreshed periodically. Wire a real price feed here
@@ -806,26 +837,23 @@ async function pollLivePrice() {
     chgEl.className = 'price-chg ' + (chg >= 0 ? 'up' : 'down');
   }
 
-  Chart.defaults.color = '#666';
-  if (priceChart) priceChart.destroy();
-  priceChart = new Chart(document.getElementById('priceChart').getContext('2d'), {
-    type: 'line',
-    data: {
-      labels: hist.map((_,i) => i),
-      datasets: [{ data: hist, borderColor: '#d4af37', backgroundColor: 'rgba(212,175,55,0.08)', borderWidth: 2, pointRadius: 0, fill: true, tension: 0.35 }]
-    },
-    options: {
-      responsive: true, animation: false,
-      plugins: { legend: { display: false }, tooltip: { enabled: false } },
-      scales: { x: { display: false }, y: { ticks: { callback: v => '$' + fmt(v), font: { size: 9 } }, grid: { color: '#1e2440' } } }
-    }
-  });
+  renderLivePriceChart(hist);
 }
 
 function switchSymbol(el, symbol) {
   document.querySelectorAll('.symbol-tab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
   currentSymbol = symbol;
+
+  // FIX: reset history + destroy the chart instance when switching symbols so
+  // the old symbol's price history doesn't bleed into the new symbol's chart
+  // (previously caused a visible jump/flicker on symbol switch).
+  priceHistory[currentSymbol] = [];
+  if (priceChart) { priceChart.destroy(); priceChart = null; }
+  document.getElementById('livePriceVal').textContent = '—';
+  document.getElementById('livePriceChg').textContent = '+0.00%';
+  document.getElementById('livePriceChg').className = 'price-chg up';
+
   pollLivePrice();
 }
 

@@ -1818,7 +1818,7 @@ def admin_migrate_flat_profit():
                     (delta, delta, uid)
                 )
                 note = (
-                    "Balance correction: migrated to flat $8 per $100 net-deposit "
+                    "Balance correction: migrated to flat $4.5 per $100 net-deposit "
                     "profit basis (previously compounded daily)."
                 )
                 cur.execute(
@@ -1932,7 +1932,7 @@ def scheduler_status():
         "next_run_utc":      next_run.isoformat(),
         "hours_until_run":   hours_left,
         "daily_profit_rate": DAILY_PROFIT_PER_100,
-        "profit_basis":      "flat $8 per $100 net deposited (non-compounding)",
+        "profit_basis":      "flat $4.5 per $100 net deposited (non-compounding)",
         "min_balance":       MIN_BALANCE,
         "symbol":            TRADE_SYMBOL,
     })

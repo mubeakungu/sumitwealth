@@ -34,6 +34,7 @@
     .price-chg { font-size:12px; }
     .price-chg.up { color:#00e090; }
     .price-chg.down { color:#ff4560; }
+    .price-stale { font-size:10px; color:#666; margin-left:6px; }
     .symbol-tabs { display:flex; gap:6px; }
     .symbol-tab { padding:4px 10px; font-size:11px; border-radius:14px; border:1px solid #333; background:#0a0e27; color:#aaa; cursor:pointer; }
     .symbol-tab.active { background:#d4af37; color:#0a0e27; border-color:#d4af37; font-weight:bold; }
@@ -169,13 +170,17 @@
   <div class="charts-row">
     <div class="chart-card">
       <h3>Live Price Chart</h3>
-      <div class="chart-subtitle">Real trade activity across BTC, ETH &amp; BNB (% change since first trade)</div>
+      <div class="chart-subtitle">Real-time market data</div>
       <div class="symbol-tabs" style="margin-bottom:10px;">
-        <button class="symbol-tab" id="tab-BTCUSDT" data-symbol="BTCUSDT" onclick="toggleSymbol(this,'BTCUSDT')">BTC/USDT</button>
-        <button class="symbol-tab" id="tab-ETHUSDT" data-symbol="ETHUSDT" onclick="toggleSymbol(this,'ETHUSDT')">ETH/USDT</button>
-        <button class="symbol-tab" id="tab-BNBUSDT" data-symbol="BNBUSDT" onclick="toggleSymbol(this,'BNBUSDT')">BNB/USDT</button>
+        <button class="symbol-tab active" data-symbol="BTCUSDT" onclick="switchSymbol(this,'BTCUSDT')">BTC/USDT</button>
+        <button class="symbol-tab" data-symbol="ETHUSDT" onclick="switchSymbol(this,'ETHUSDT')">ETH/USDT</button>
+        <button class="symbol-tab" data-symbol="BNBUSDT" onclick="switchSymbol(this,'BNBUSDT')">BNB/USDT</button>
       </div>
-      <div class="price-row" id="priceRow" style="gap:22px;flex-wrap:wrap;align-items:flex-start;"></div>
+      <div class="price-row">
+        <span class="price-val" id="livePriceVal">—</span>
+        <span class="price-chg up" id="livePriceChg">+0.00%</span>
+        <span class="price-stale" id="priceStale"></span>
+      </div>
       <canvas id="priceChart" height="140"></canvas>
     </div>
     <div class="chart-card">
@@ -214,7 +219,8 @@
     <div class="panel form-wrap">
       <div class="panel-title">&#8593; Make a Deposit</div>
       <div class="method-tabs">
-        <div class="method-tab active" data-method="TRC20" onclick="switchDepositMethod(this,'TRC20')">USDT TRC20</div>
+        <div class="method-tab active" data-method="MPESA" onclick="switchDepositMethod(this,'MPESA')">&#128247; M-Pesa</div>
+        <div class="method-tab" data-method="TRC20" onclick="switchDepositMethod(this,'TRC20')">USDT TRC20</div>
         <div class="method-tab" data-method="BEP20" onclick="switchDepositMethod(this,'BEP20')">USDT BEP20</div>
         <div class="method-tab" data-method="ERC20" onclick="switchDepositMethod(this,'ERC20')">USDT ERC20</div>
       </div>
@@ -222,8 +228,29 @@
       <div class="alert alert-success" id="depositSuccess"></div>
       <div class="alert alert-error"   id="depositError"></div>
 
+      <!-- M-PESA PANEL -->
+      <div class="method-panel show" id="panel-MPESA">
+        <div class="form-group">
+          <label>M-Pesa Phone Number</label>
+          <input type="text" id="mpesaPhone" placeholder="07XX XXX XXX">
+        </div>
+        <div class="form-group">
+          <label>Amount (KES)</label>
+          <input type="number" id="mpesaAmount" placeholder="Minimum KES 12,952">
+        </div>
+        <button class="btn btn-gold" style="width:100%;padding:12px;" onclick="submitMpesaDeposit()">
+          &#128247; Send M-Pesa Prompt
+        </button>
+
+        <div class="stk-waiting" id="stkWaiting">
+          <div class="spinner"></div>
+          <div style="color:#d4af37;font-weight:bold;margin-bottom:4px;">Waiting for confirmation...</div>
+          <div style="color:#aaa;font-size:12px;">Check your phone and enter your M-Pesa PIN</div>
+        </div>
+      </div>
+
       <!-- USDT MANUAL PANELS -->
-      <div class="method-panel show" id="panel-TRC20">
+      <div class="method-panel" id="panel-TRC20">
         <div class="wallet-box">
           Send USDT (TRC20 network) to:<br>
           <span class="addr" id="addrTRC20">Loading...</span>
@@ -352,11 +379,10 @@ function escHtml(s) {
 }
 
 let priceChart, plChart, balanceChart, txSummaryChart;
-const symbolOrder = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT'];
-const symbolColors = { BTCUSDT: '#d4af37', ETHUSDT: '#4f9dff', BNBUSDT: '#a78bfa' };
-const symbolLabels = { BTCUSDT: 'BTC/USDT', ETHUSDT: 'ETH/USDT', BNBUSDT: 'BNB/USDT' };
-let visibleSymbols = { BTCUSDT: true, ETHUSDT: true, BNBUSDT: true };
-let allTradesCache = [];
+let currentSymbol = 'BTCUSDT';
+let priceHistory = { BTCUSDT: [], ETHUSDT: [], BNBUSDT: [] };
+let stkPollTimer = null;
+let priceFetchFailCount = 0;
 
 // ── ALERTS ────────────────────────────────────────────────────────────────────
 function showSuccess(msg, id='globalSuccess') {
@@ -396,7 +422,7 @@ function switchDepositMethod(el, method) {
   document.getElementById('panel-' + method).classList.add('show');
   document.getElementById('depositSuccess').classList.remove('show');
   document.getElementById('depositError').classList.remove('show');
-  loadWalletAddress(method);
+  if (method !== 'MPESA') loadWalletAddress(method);
 }
 
 // ── SUMMARY / STATS ───────────────────────────────────────────────────────────
@@ -498,6 +524,41 @@ async function submitManualDeposit(network) {
   showSuccess(d.data.message, 'depositSuccess');
   document.getElementById('amt' + network).value = '';
   await refreshAll();
+}
+
+// ── DEPOSIT: M-PESA STK PUSH ──────────────────────────────────────────────────
+async function submitMpesaDeposit() {
+  const phone  = document.getElementById('mpesaPhone').value.trim();
+  const amount = parseFloat(document.getElementById('mpesaAmount').value || 0);
+  if (!phone) { showError('Enter your M-Pesa phone number', 'depositError'); return; }
+  if (!amount || amount < 12952.2169) { showError('Minimum deposit is KES 12,952.22', 'depositError'); return; }
+
+  const d = await post('/api/client/mpesa/stk-push', { phone_number: phone, amount });
+  if (!d.success) { showError(d.error, 'depositError'); return; }
+
+  showSuccess(d.data.message, 'depositSuccess');
+  document.getElementById('stkWaiting').classList.add('show');
+  pollMpesaStatus(d.data.checkout_request_id);
+}
+
+function pollMpesaStatus(checkoutId) {
+  if (stkPollTimer) clearInterval(stkPollTimer);
+  stkPollTimer = setInterval(async () => {
+    const d = await api('/api/client/mpesa/status?checkout_request_id=' + encodeURIComponent(checkoutId));
+    if (!d.success) return;
+    if (d.data.status === 'COMPLETED') {
+      clearInterval(stkPollTimer);
+      document.getElementById('stkWaiting').classList.remove('show');
+      showSuccess(`Deposit of $${fmt(d.data.amount)} confirmed!`, 'depositSuccess');
+      document.getElementById('mpesaPhone').value = '';
+      document.getElementById('mpesaAmount').value = '';
+      refreshAll();
+    } else if (d.data.status === 'REJECTED') {
+      clearInterval(stkPollTimer);
+      document.getElementById('stkWaiting').classList.remove('show');
+      showError(d.data.message || 'M-Pesa payment failed or was cancelled', 'depositError');
+    }
+  }, 5000);
 }
 
 // ── WITHDRAW ──────────────────────────────────────────────────────────────────
@@ -723,141 +784,88 @@ async function loadHistoryCharts() {
   });
 }
 
-// ── LIVE PRICE CHART — all three coins, driven by real trade history ────────
-//
-// Shows BTC, ETH & BNB together on one chart. Since their prices are on
-// wildly different scales ($60k+ vs ~$3k vs ~$600), each line is plotted as
-// % change from that coin's own first trade — so the shapes/patterns are
-// directly comparable rather than BTC dwarfing the others. Each coin's tab
-// is a visibility toggle (all three on by default); the underlying data for
-// hidden coins stays loaded so toggling is instant and doesn't reshuffle
-// the x-axis.
-function buildAllSymbolSeries() {
-  const bySymbol = {};
-  symbolOrder.forEach(s => (bySymbol[s] = []));
-  allTradesCache.forEach(t => {
-    if (!bySymbol[t.symbol]) return;
-    if (t.entry_price != null) {
-      bySymbol[t.symbol].push({ time: t.opened_at || '', price: t.entry_price });
-    }
-    if (t.status !== 'OPEN' && t.close_price != null) {
-      bySymbol[t.symbol].push({ time: t.closed_at || t.opened_at || '', price: t.close_price });
-    }
-  });
-  symbolOrder.forEach(s => bySymbol[s].sort((a, b) => a.time.localeCompare(b.time)));
-  return bySymbol;
-}
-
-function styleSymbolTab(symbol) {
-  const el = document.getElementById('tab-' + symbol);
-  if (!el) return;
-  const active = visibleSymbols[symbol];
-  el.style.background = active ? symbolColors[symbol] : '#0a0e27';
-  el.style.color = active ? '#0a0e27' : '#aaa';
-  el.style.borderColor = active ? symbolColors[symbol] : '#333';
-  el.style.fontWeight = active ? 'bold' : 'normal';
-}
-
-function renderPriceRow(bySymbol) {
-  const html = symbolOrder.map(s => {
-    const series = bySymbol[s];
-    if (!series.length) {
-      return `<div><div style="color:${symbolColors[s]};font-weight:bold;font-size:12px;">${symbolLabels[s]}</div><div style="color:#555;font-size:13px;margin-top:4px;">No trades yet</div></div>`;
-    }
-    const first = series[0].price;
-    const last = series[series.length - 1].price;
-    const chg = first ? ((last - first) / first) * 100 : 0;
-    const chgClass = chg >= 0 ? 'up' : 'down';
-    return `<div>
-      <div style="color:${symbolColors[s]};font-weight:bold;font-size:12px;">${symbolLabels[s]}</div>
-      <div style="margin-top:4px;"><span class="price-val" style="font-size:16px;">$${fmt(last)}</span> <span class="price-chg ${chgClass}">${(chg >= 0 ? '+' : '')}${chg.toFixed(2)}%</span></div>
-    </div>`;
-  }).join('');
-  setHTML('priceRow', html);
-}
-
-function renderLivePriceChart(bySymbol) {
-  const ctx = document.getElementById('priceChart').getContext('2d');
-  Chart.defaults.color = '#666';
-
-  // Union of every timestamp across all three coins keeps the x-axis stable
-  // regardless of which coins are toggled on/off.
-  const timeSet = new Set();
-  symbolOrder.forEach(s => bySymbol[s].forEach(p => timeSet.add(p.time)));
-  const times = [...timeSet].sort();
-  const labels = times.map(t => t.substring(0, 16).replace('T', ' '));
-
-  const datasets = symbolOrder.map(s => {
-    const series = bySymbol[s];
-    const base = series.length ? series[0].price : null;
-    const byTime = {};
-    series.forEach(p => { byTime[p.time] = p.price; });
-    const data = times.map(t => {
-      if (base == null || !(t in byTime)) return null;
-      return Math.round(((byTime[t] - base) / base) * 10000) / 100; // % change, 2dp
-    });
-    return {
-      label: symbolLabels[s],
-      data,
-      borderColor: symbolColors[s],
-      backgroundColor: symbolColors[s] + '20',
-      borderWidth: 2,
-      pointRadius: times.length <= 30 ? 3 : 0,
-      pointBackgroundColor: symbolColors[s],
-      fill: false,
-      tension: 0.3,
-      spanGaps: true,
-      hidden: !visibleSymbols[s]
-    };
-  });
-
-  if (!priceChart) {
-    priceChart = new Chart(ctx, {
-      type: 'line',
-      data: { labels, datasets },
-      options: {
-        responsive: true, animation: false,
-        plugins: {
-          legend: { display: false },
-          tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y >= 0 ? '+' : ''}${c.parsed.y}%` } }
-        },
-        scales: {
-          x: { display: labels.length > 1, ticks: { font: { size: 9 }, maxTicksLimit: 6 }, grid: { display: false } },
-          y: { ticks: { callback: v => v + '%', font: { size: 9 } }, grid: { color: '#1e2440' } }
-        }
-      }
-    });
-    return;
+// ── LIVE PRICE (real market data via Binance public REST API) ───────────────
+// Binance's ticker/price and klines endpoints are CORS-enabled, so they can
+// be called directly from the browser without a backend proxy. If your
+// deployment environment blocks outbound calls to Binance, swap the fetch
+// URLs below for a proxy route on your own backend instead.
+async function fetchBinancePrice(symbol) {
+  try {
+    const res = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`);
+    if (!res.ok) throw new Error('bad response');
+    const data = await res.json();
+    return parseFloat(data.price);
+  } catch (e) {
+    console.error('Live price fetch failed', e);
+    return null;
   }
+}
 
-  // Update existing chart in place instead of destroy/recreate — avoids flicker.
-  priceChart.data.labels = labels;
-  priceChart.data.datasets.forEach((ds, i) => {
-    ds.data = datasets[i].data;
-    ds.hidden = datasets[i].hidden;
-    ds.pointRadius = datasets[i].pointRadius;
-  });
-  priceChart.options.scales.x.display = labels.length > 1;
-  priceChart.update('none'); // 'none' = no re-animation flash, just redraw the lines
+async function fetchBinanceHistory(symbol) {
+  try {
+    const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1m&limit=30`);
+    if (!res.ok) throw new Error('bad response');
+    const data = await res.json();
+    // kline format: [openTime, open, high, low, close, volume, ...] — use close price
+    return data.map(k => parseFloat(k[4])).filter(v => !isNaN(v));
+  } catch (e) {
+    console.error('Price history fetch failed', e);
+    return [];
+  }
 }
 
 async function pollLivePrice() {
-  const d = await api('/api/client/trades?status=');
-  if (d.success) allTradesCache = d.data;
+  const price = await fetchBinancePrice(currentSymbol);
+  const staleEl = document.getElementById('priceStale');
 
-  const bySymbol = buildAllSymbolSeries();
-  renderPriceRow(bySymbol);
-  renderLivePriceChart(bySymbol);
+  if (!price) {
+    priceFetchFailCount++;
+    if (priceFetchFailCount >= 2) {
+      staleEl.textContent = '⚠ price feed unavailable';
+    }
+    return;
+  }
+  priceFetchFailCount = 0;
+  staleEl.textContent = '';
+
+  const hist = priceHistory[currentSymbol];
+  hist.push(price);
+  if (hist.length > 30) hist.shift();
+
+  document.getElementById('livePriceVal').textContent = '$' + fmt(price);
+  if (hist.length > 1) {
+    const chg = ((price - hist[0]) / hist[0]) * 100;
+    const chgEl = document.getElementById('livePriceChg');
+    chgEl.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
+    chgEl.className = 'price-chg ' + (chg >= 0 ? 'up' : 'down');
+  }
+
+  Chart.defaults.color = '#666';
+  if (priceChart) priceChart.destroy();
+  priceChart = new Chart(document.getElementById('priceChart').getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: hist.map((_,i) => i),
+      datasets: [{ data: hist, borderColor: '#d4af37', backgroundColor: 'rgba(212,175,55,0.08)', borderWidth: 2, pointRadius: 0, fill: true, tension: 0.35 }]
+    },
+    options: {
+      responsive: true, animation: false,
+      plugins: { legend: { display: false }, tooltip: { enabled: false } },
+      scales: { x: { display: false }, y: { ticks: { callback: v => '$' + fmt(v), font: { size: 9 } }, grid: { color: '#1e2440' } } }
+    }
+  });
 }
 
-function toggleSymbol(el, symbol) {
-  visibleSymbols[symbol] = !visibleSymbols[symbol];
-  styleSymbolTab(symbol);
-  if (priceChart) {
-    const idx = symbolOrder.indexOf(symbol);
-    priceChart.data.datasets[idx].hidden = !visibleSymbols[symbol];
-    priceChart.update('none');
+async function switchSymbol(el, symbol) {
+  document.querySelectorAll('.symbol-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  currentSymbol = symbol;
+
+  // Seed with real recent history so the chart isn't flat/empty right after switching
+  if (!priceHistory[symbol] || !priceHistory[symbol].length) {
+    priceHistory[symbol] = await fetchBinanceHistory(symbol);
   }
+  pollLivePrice();
 }
 
 // ── REFRESH / INIT ────────────────────────────────────────────────────────────
@@ -868,10 +876,12 @@ async function refreshAll() {
 }
 
 async function init() {
-  symbolOrder.forEach(styleSymbolTab);
   await loadSummary();
   await loadHistoryCharts();
   await loadNotifCount();
+
+  // Seed live price chart with real recent history, then start ticking
+  priceHistory[currentSymbol] = await fetchBinanceHistory(currentSymbol);
   await pollLivePrice();
   setInterval(pollLivePrice, 15000);
   setInterval(refreshAll, 60000);

@@ -169,7 +169,7 @@
   <div class="charts-row">
     <div class="chart-card">
       <h3>Live Price Chart</h3>
-      <div class="chart-subtitle">Real-time market data</div>
+      <div class="chart-subtitle">Your trade activity for this symbol</div>
       <div class="symbol-tabs" style="margin-bottom:10px;">
         <button class="symbol-tab active" data-symbol="BTCUSDT" onclick="switchSymbol(this,'BTCUSDT')">BTC/USDT</button>
         <button class="symbol-tab" data-symbol="ETHUSDT" onclick="switchSymbol(this,'ETHUSDT')">ETH/USDT</button>
@@ -379,6 +379,7 @@ function escHtml(s) {
 let priceChart, plChart, balanceChart, txSummaryChart;
 let currentSymbol = 'BTCUSDT';
 let priceHistory = { BTCUSDT: [], ETHUSDT: [], BNBUSDT: [] };
+let allTradesCache = [];
 let stkPollTimer = null;
 
 // ── ALERTS ────────────────────────────────────────────────────────────────────
@@ -781,63 +782,91 @@ async function loadHistoryCharts() {
   });
 }
 
-// ── LIVE PRICE (polling — no public price API wired here beyond summary, so
-//    this uses a lightweight self-poll of the trades/summary endpoints;
-//    swap in a real market-data feed if you want tick-level updates) ────────
+// ── LIVE PRICE CHART — driven by the client's actual trade history ──────────
 //
-// FIX: previously this destroyed and recreated the Chart.js instance on every
-// poll (every 15s), causing a visible flicker/flash. Now it creates the chart
-// once per symbol and just pushes new data into the existing instance via
-// .update(), which animates smoothly instead of flashing.
-function renderLivePriceChart(hist) {
+// FIX: the previous version polled a single "latest trade" every 15s and
+// pushed the same repeated price into the chart, so the line for a symbol
+// was flat unless a brand-new trade landed in that exact 15s window — it
+// never showed real trade activity for BTC/ETH/BNB.
+//
+// This version pulls ALL of the client's trades, filters by the selected
+// symbol, sorts them chronologically, and plots each trade's entry price
+// (and close price, if closed) as a point in sequence — so the graph
+// actually traces the trading activity for that currency. It still polls
+// periodically so newly opened/closed trades appear without a refresh.
+function buildSymbolPricePoints(symbol) {
+  return allTradesCache
+    .filter(t => t.symbol === symbol)
+    .sort((a, b) => (a.opened_at || '').localeCompare(b.opened_at || ''))
+    .flatMap(t => {
+      const pts = [];
+      if (t.entry_price != null) {
+        pts.push({ label: (t.opened_at || '').substring(0, 16).replace('T', ' '), price: t.entry_price });
+      }
+      if (t.status !== 'OPEN' && t.close_price != null) {
+        pts.push({ label: (t.closed_at || t.opened_at || '').substring(0, 16).replace('T', ' '), price: t.close_price });
+      }
+      return pts;
+    });
+}
+
+function renderLivePriceChart(points) {
   const ctx = document.getElementById('priceChart').getContext('2d');
   Chart.defaults.color = '#666';
+
+  const labels = points.map(p => p.label);
+  const data = points.map(p => p.price);
 
   if (!priceChart) {
     priceChart = new Chart(ctx, {
       type: 'line',
       data: {
-        labels: hist.map((_, i) => i),
-        datasets: [{ data: hist.slice(), borderColor: '#d4af37', backgroundColor: 'rgba(212,175,55,0.08)', borderWidth: 2, pointRadius: 0, fill: true, tension: 0.35 }]
+        labels,
+        datasets: [{ data, borderColor: '#d4af37', backgroundColor: 'rgba(212,175,55,0.08)', borderWidth: 2, pointRadius: points.length <= 30 ? 2 : 0, pointBackgroundColor: '#d4af37', fill: true, tension: 0.35 }]
       },
       options: {
         responsive: true, animation: false,
-        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => '$' + fmt(c.parsed.y) } } },
         scales: { x: { display: false }, y: { ticks: { callback: v => '$' + fmt(v), font: { size: 9 } }, grid: { color: '#1e2440' } } }
       }
     });
     return;
   }
 
-  // Update existing chart in place instead of destroy/recreate
-  priceChart.data.labels = hist.map((_, i) => i);
-  priceChart.data.datasets[0].data = hist.slice();
+  // Update existing chart in place instead of destroy/recreate — avoids flicker.
+  priceChart.data.labels = labels;
+  priceChart.data.datasets[0].data = data;
+  priceChart.data.datasets[0].pointRadius = points.length <= 30 ? 2 : 0;
   priceChart.update('none'); // 'none' = no re-animation flash, just redraw the line
 }
 
 async function pollLivePrice() {
-  // Uses the most recent trade's entry_price as a stand-in "live" reference
-  // point per symbol, refreshed periodically. Wire a real price feed here
-  // if you want independent live ticking.
   const d = await api('/api/client/trades?status=');
-  if (!d.success) return;
-  const latest = d.data.find(t => t.symbol === currentSymbol);
-  const price = latest ? latest.close_price || latest.entry_price : null;
-  if (!price) return;
+  if (d.success) allTradesCache = d.data;
 
-  const hist = priceHistory[currentSymbol];
-  hist.push(price);
-  if (hist.length > 30) hist.shift();
+  const points = buildSymbolPricePoints(currentSymbol);
+  priceHistory[currentSymbol] = points;
 
-  document.getElementById('livePriceVal').textContent = '$' + fmt(price);
-  if (hist.length > 1) {
-    const chg = ((price - hist[0]) / hist[0]) * 100;
-    const chgEl = document.getElementById('livePriceChg');
-    chgEl.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
-    chgEl.className = 'price-chg ' + (chg >= 0 ? 'up' : 'down');
+  const valEl = document.getElementById('livePriceVal');
+  const chgEl = document.getElementById('livePriceChg');
+
+  if (!points.length) {
+    valEl.textContent = '—';
+    chgEl.textContent = '+0.00%';
+    chgEl.className = 'price-chg up';
+    renderLivePriceChart(points);
+    return;
   }
 
-  renderLivePriceChart(hist);
+  const first = points[0].price;
+  const last = points[points.length - 1].price;
+  valEl.textContent = '$' + fmt(last);
+
+  const chg = first ? ((last - first) / first) * 100 : 0;
+  chgEl.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
+  chgEl.className = 'price-chg ' + (chg >= 0 ? 'up' : 'down');
+
+  renderLivePriceChart(points);
 }
 
 function switchSymbol(el, symbol) {
@@ -845,15 +874,17 @@ function switchSymbol(el, symbol) {
   el.classList.add('active');
   currentSymbol = symbol;
 
-  // FIX: reset history + destroy the chart instance when switching symbols so
-  // the old symbol's price history doesn't bleed into the new symbol's chart
-  // (previously caused a visible jump/flicker on symbol switch).
+  // Reset + destroy the chart instance when switching symbols so the old
+  // symbol's trade history doesn't bleed into the new symbol's chart.
   priceHistory[currentSymbol] = [];
   if (priceChart) { priceChart.destroy(); priceChart = null; }
   document.getElementById('livePriceVal').textContent = '—';
   document.getElementById('livePriceChg').textContent = '+0.00%';
   document.getElementById('livePriceChg').className = 'price-chg up';
 
+  // Re-render immediately from the already-cached trades (no need to
+  // re-fetch), then let the regular poll cycle keep it fresh.
+  renderLivePriceChart(buildSymbolPricePoints(symbol));
   pollLivePrice();
 }
 

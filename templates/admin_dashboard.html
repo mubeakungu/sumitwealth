@@ -310,14 +310,32 @@
 
   <!-- ADJUST -->
   <div id="adjust" class="tab-content">
-    <div class="panel" style="max-width:500px;">
-      <div class="panel-title">&#9881; Manually Adjust Client Balance</div>
+    <div class="panel" style="max-width:520px;">
+      <div class="panel-title">&#9881; Manually Adjust Client</div>
+      <p style="color:#666;font-size:11px;margin:-10px 0 14px;">
+        Choose which figure to adjust for this client, then enter a positive
+        amount to add or a negative amount to subtract. The note is required
+        and is recorded against this adjustment.
+      </p>
       <div class="form-group">
         <label>Select Client</label>
-        <select id="adjustClient"><option value="">— Select client —</option></select>
+        <select id="adjustClient" onchange="updateAdjustCurrentValue()"><option value="">— Select client —</option></select>
       </div>
       <div class="form-group">
-        <label>Amount (positive = credit, negative = debit)</label>
+        <label>Field to Adjust</label>
+        <select id="adjustField" onchange="updateAdjustCurrentValue()">
+          <option value="balance">Balance</option>
+          <option value="equity">Equity</option>
+          <option value="total_deposits">Total Deposits</option>
+          <option value="total_withdrawals">Total Withdrawals</option>
+          <option value="total_profit">Trade Profit</option>
+          <option value="total_ref_earned">Referral Earnings</option>
+          <option value="ref_balance">Referral Balance (withdrawable)</option>
+        </select>
+      </div>
+      <div id="adjustCurrentVal" style="font-size:11px;color:#666;margin:-8px 0 14px;">Current value: —</div>
+      <div class="form-group">
+        <label>Amount (positive = credit/increase, negative = debit/decrease)</label>
         <input type="number" id="adjustAmount" placeholder="e.g. 500 or -200">
       </div>
       <div class="form-group">
@@ -1008,6 +1026,17 @@ async function loadTrades() {
 }
 
 // ── ADJUST ────────────────────────────────────────────────────────────────────
+// Which client fields can be adjusted, and their display labels.
+const adjustFieldLabels = {
+  balance:            'Balance',
+  equity:              'Equity',
+  total_deposits:      'Total Deposits',
+  total_withdrawals:   'Total Withdrawals',
+  total_profit:        'Trade Profit',
+  total_ref_earned:    'Referral Earnings',
+  ref_balance:         'Referral Balance'
+};
+
 function populateAdjustClients() {
   const sel = document.getElementById('adjustClient');
   const cur = sel.value;
@@ -1019,21 +1048,41 @@ function populateAdjustClients() {
     if (c.id === cur) opt.selected = true;
     sel.appendChild(opt);
   });
+  updateAdjustCurrentValue();
+}
+
+// Shows the client's current value for whichever field is selected, so the
+// admin can see what they're adjusting before entering an amount.
+function updateAdjustCurrentValue() {
+  const uid   = document.getElementById('adjustClient').value;
+  const field = document.getElementById('adjustField').value;
+  const el    = document.getElementById('adjustCurrentVal');
+  const c     = _clientMap[uid];
+  if (!c) { el.textContent = 'Current value: —'; return; }
+  const val = parseFloat(c[field] || 0);
+  el.textContent = `Current ${adjustFieldLabels[field]}: ${fmtD(val)}`;
 }
 
 async function submitAdjust() {
   const uid    = document.getElementById('adjustClient').value;
+  const field  = document.getElementById('adjustField').value;
   const amount = parseFloat(document.getElementById('adjustAmount').value || 0);
   const note   = document.getElementById('adjustNote').value.trim();
   if (!uid)    { showError('Select a client', 'adjustError'); return; }
   if (!amount) { showError('Enter an amount', 'adjustError'); return; }
   if (!note)   { showError('Enter a reason',  'adjustError'); return; }
-  const d = await post(`/api/admin/client/${uid}/adjust`, { amount, note });
+
+  // NOTE: this now sends a `field` key alongside amount/note so the backend
+  // knows which client column to adjust. See the message accompanying this
+  // file for what the /api/admin/client/<uid>/adjust route needs to do
+  // with it — it previously only ever touched `balance`.
+  const d = await post(`/api/admin/client/${uid}/adjust`, { amount, note, field });
   if (!d.success) { showError(d.error, 'adjustError'); return; }
   showSuccess(d.data.message, 'adjustSuccess');
   document.getElementById('adjustAmount').value = '';
   document.getElementById('adjustNote').value   = '';
   await refreshData();
+  updateAdjustCurrentValue();
 }
 
 // ── EDIT CLIENT ───────────────────────────────────────────────────────────────
@@ -1336,3 +1385,4 @@ init();
 </script>
 </body>
 </html>
+Done

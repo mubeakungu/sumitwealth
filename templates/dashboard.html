@@ -214,8 +214,7 @@
     <div class="panel form-wrap">
       <div class="panel-title">&#8593; Make a Deposit</div>
       <div class="method-tabs">
-        <div class="method-tab active" data-method="MPESA" onclick="switchDepositMethod(this,'MPESA')">&#128247; M-Pesa</div>
-        <div class="method-tab" data-method="TRC20" onclick="switchDepositMethod(this,'TRC20')">USDT TRC20</div>
+        <div class="method-tab active" data-method="TRC20" onclick="switchDepositMethod(this,'TRC20')">USDT TRC20</div>
         <div class="method-tab" data-method="BEP20" onclick="switchDepositMethod(this,'BEP20')">USDT BEP20</div>
         <div class="method-tab" data-method="ERC20" onclick="switchDepositMethod(this,'ERC20')">USDT ERC20</div>
       </div>
@@ -223,29 +222,8 @@
       <div class="alert alert-success" id="depositSuccess"></div>
       <div class="alert alert-error"   id="depositError"></div>
 
-      <!-- M-PESA PANEL -->
-      <div class="method-panel show" id="panel-MPESA">
-        <div class="form-group">
-          <label>M-Pesa Phone Number</label>
-          <input type="text" id="mpesaPhone" placeholder="07XX XXX XXX">
-        </div>
-        <div class="form-group">
-          <label>Amount (KES)</label>
-          <input type="number" id="mpesaAmount" placeholder="Minimum KES 12,952">
-        </div>
-        <button class="btn btn-gold" style="width:100%;padding:12px;" onclick="submitMpesaDeposit()">
-          &#128247; Send M-Pesa Prompt
-        </button>
-
-        <div class="stk-waiting" id="stkWaiting">
-          <div class="spinner"></div>
-          <div style="color:#d4af37;font-weight:bold;margin-bottom:4px;">Waiting for confirmation...</div>
-          <div style="color:#aaa;font-size:12px;">Check your phone and enter your M-Pesa PIN</div>
-        </div>
-      </div>
-
       <!-- USDT MANUAL PANELS -->
-      <div class="method-panel" id="panel-TRC20">
+      <div class="method-panel show" id="panel-TRC20">
         <div class="wallet-box">
           Send USDT (TRC20 network) to:<br>
           <span class="addr" id="addrTRC20">Loading...</span>
@@ -379,7 +357,6 @@ const symbolColors = { BTCUSDT: '#d4af37', ETHUSDT: '#4f9dff', BNBUSDT: '#a78bfa
 const symbolLabels = { BTCUSDT: 'BTC/USDT', ETHUSDT: 'ETH/USDT', BNBUSDT: 'BNB/USDT' };
 let visibleSymbols = { BTCUSDT: true, ETHUSDT: true, BNBUSDT: true };
 let allTradesCache = [];
-let stkPollTimer = null;
 
 // ── ALERTS ────────────────────────────────────────────────────────────────────
 function showSuccess(msg, id='globalSuccess') {
@@ -419,7 +396,7 @@ function switchDepositMethod(el, method) {
   document.getElementById('panel-' + method).classList.add('show');
   document.getElementById('depositSuccess').classList.remove('show');
   document.getElementById('depositError').classList.remove('show');
-  if (method !== 'MPESA') loadWalletAddress(method);
+  loadWalletAddress(method);
 }
 
 // ── SUMMARY / STATS ───────────────────────────────────────────────────────────
@@ -521,41 +498,6 @@ async function submitManualDeposit(network) {
   showSuccess(d.data.message, 'depositSuccess');
   document.getElementById('amt' + network).value = '';
   await refreshAll();
-}
-
-// ── DEPOSIT: M-PESA STK PUSH ──────────────────────────────────────────────────
-async function submitMpesaDeposit() {
-  const phone  = document.getElementById('mpesaPhone').value.trim();
-  const amount = parseFloat(document.getElementById('mpesaAmount').value || 0);
-  if (!phone) { showError('Enter your M-Pesa phone number', 'depositError'); return; }
-  if (!amount || amount < 12952.2169) { showError('Minimum deposit is KES 12,952.22', 'depositError'); return; }
-
-  const d = await post('/api/client/mpesa/stk-push', { phone_number: phone, amount });
-  if (!d.success) { showError(d.error, 'depositError'); return; }
-
-  showSuccess(d.data.message, 'depositSuccess');
-  document.getElementById('stkWaiting').classList.add('show');
-  pollMpesaStatus(d.data.checkout_request_id);
-}
-
-function pollMpesaStatus(checkoutId) {
-  if (stkPollTimer) clearInterval(stkPollTimer);
-  stkPollTimer = setInterval(async () => {
-    const d = await api('/api/client/mpesa/status?checkout_request_id=' + encodeURIComponent(checkoutId));
-    if (!d.success) return;
-    if (d.data.status === 'COMPLETED') {
-      clearInterval(stkPollTimer);
-      document.getElementById('stkWaiting').classList.remove('show');
-      showSuccess(`Deposit of $${fmt(d.data.amount)} confirmed!`, 'depositSuccess');
-      document.getElementById('mpesaPhone').value = '';
-      document.getElementById('mpesaAmount').value = '';
-      refreshAll();
-    } else if (d.data.status === 'REJECTED') {
-      clearInterval(stkPollTimer);
-      document.getElementById('stkWaiting').classList.remove('show');
-      showError(d.data.message || 'M-Pesa payment failed or was cancelled', 'depositError');
-    }
-  }, 5000);
 }
 
 // ── WITHDRAW ──────────────────────────────────────────────────────────────────

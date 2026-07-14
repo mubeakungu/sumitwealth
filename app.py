@@ -70,6 +70,13 @@ Summit Wealth v5.13 - $4.5 PROFIT PER $100 BALANCE (4.5% daily)
             eligibility/payout logic as run_daily_trades(), scoped to a
             single user_id, and is idempotent via the same
             UNIQUE(user_id, date) constraint.
+- FIX v5.16: PROFIT BASIS DECOUPLED FROM ELIGIBILITY MINIMUM — profit rate
+            is now $4.5 per $90 of net deposit (was $4.5 per $100). The
+            minimum net deposit required to be eligible for daily trades
+            remains $100 (MIN_BALANCE, unchanged) — these were previously
+            tied together by both hardcoding "100.0"; they are now two
+            independent constants (MIN_BALANCE for eligibility,
+            PROFIT_BASIS_USD for the profit-per-unit divisor).
 """
 
 import os, hashlib, secrets, datetime, uuid, logging, threading, random, base64
@@ -126,6 +133,7 @@ if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL environment variable is not set!")
 
 DAILY_PROFIT_PER_100 = float(os.environ.get("DAILY_PROFIT_USD", "4.5"))
+PROFIT_BASIS_USD     = float(os.environ.get("PROFIT_BASIS_USD", "90.0"))
 MIN_BALANCE          = float(os.environ.get("MIN_BALANCE", "100.0"))
 TRADE_HOUR           = int(os.environ.get("TRADE_HOUR", "5"))
 TRADE_SYMBOL         = os.environ.get("TRADE_SYMBOL", "BTCUSDT")
@@ -391,7 +399,7 @@ def run_daily_trades():
 
     try:
         today = _today()
-        log.info(f"=== Daily trade run: {today} — ${DAILY_PROFIT_PER_100} profit per $100 balance ===")
+        log.info(f"=== Daily trade run: {today} — ${DAILY_PROFIT_PER_100} profit per ${PROFIT_BASIS_USD:.0f} net deposit ===")
 
         price       = get_live_price(TRADE_SYMBOL)
         pct_gain    = random.uniform(0.003, 0.005)
@@ -402,7 +410,7 @@ def run_daily_trades():
             log.error("Price diff is zero — aborting.")
             return
 
-        log.info(f"  Entry: ${price:,.2f} | Close: ${close_price:,.2f} | Rate: ${DAILY_PROFIT_PER_100}/$100")
+        log.info(f"  Entry: ${price:,.2f} | Close: ${close_price:,.2f} | Rate: ${DAILY_PROFIT_PER_100}/${PROFIT_BASIS_USD:.0f}")
 
         conn = get_db()
         cur  = conn.cursor()
@@ -422,7 +430,7 @@ def run_daily_trades():
         paid = 0
 
         for c in clients:
-            client_profit   = round((c["net_deposit"] / 100.0) * DAILY_PROFIT_PER_100, 2)
+            client_profit   = round((c["net_deposit"] / PROFIT_BASIS_USD) * DAILY_PROFIT_PER_100, 2)
             client_quantity = round(client_profit / price_diff, 6)
 
             now              = datetime.datetime.utcnow()
@@ -854,7 +862,7 @@ def client_summary():
 
     balance        = a["balance"] if a else 0
     net_deposit    = round(dep["s"] - principal_wdr["s"], 2)
-    expected_daily = round((net_deposit / 100.0) * DAILY_PROFIT_PER_100, 2) if net_deposit >= MIN_BALANCE else 0
+    expected_daily = round((net_deposit / PROFIT_BASIS_USD) * DAILY_PROFIT_PER_100, 2) if net_deposit >= MIN_BALANCE else 0
 
     return ok({
         "name":                u["name"],
@@ -1650,7 +1658,7 @@ def admin_run_single_client_trade():
         cur.close(); conn.close()
         return err("Price diff was zero — try again")
 
-    client_profit   = round((c["net_deposit"] / 100.0) * DAILY_PROFIT_PER_100, 2)
+    client_profit   = round((c["net_deposit"] / PROFIT_BASIS_USD) * DAILY_PROFIT_PER_100, 2)
     client_quantity = round(client_profit / price_diff, 6)
 
     now              = datetime.datetime.utcnow()
@@ -1704,7 +1712,7 @@ def admin_run_single_client_trade():
 @admin_required
 def admin_run_trades():
     threading.Thread(target=run_daily_trades, daemon=True).start()
-    return ok({"message": f"Daily trades triggered — ${DAILY_PROFIT_PER_100} per $100 balance"})
+    return ok({"message": f"Daily trades triggered — ${DAILY_PROFIT_PER_100} per ${PROFIT_BASIS_USD:.0f} net deposit"})
 
 @app.route("/api/admin/trade/log")
 @admin_required
@@ -1792,7 +1800,7 @@ def admin_migrate_flat_profit():
         if net_deposit < MIN_BALANCE or days_traded == 0:
             flat_daily = 0.0
         else:
-            flat_daily = round((net_deposit / 100.0) * DAILY_PROFIT_PER_100, 2)
+            flat_daily = round((net_deposit / PROFIT_BASIS_USD) * DAILY_PROFIT_PER_100, 2)
 
         correct_total_profit = round(flat_daily * days_traded, 2)
         delta = round(correct_total_profit - old_total_profit, 2)
@@ -1818,8 +1826,9 @@ def admin_migrate_flat_profit():
                     (delta, delta, uid)
                 )
                 note = (
-                    "Balance correction: migrated to flat $4.5 per $100 net-deposit "
-                    "profit basis (previously compounded daily)."
+                    f"Balance correction: migrated to flat ${DAILY_PROFIT_PER_100:.1f} per "
+                    f"${PROFIT_BASIS_USD:.0f} net-deposit profit basis (previously "
+                    f"compounded daily)."
                 )
                 cur.execute(
                     "INSERT INTO transactions(id,user_id,account_id,type,method,amount_usd,"
@@ -1837,7 +1846,7 @@ def admin_migrate_flat_profit():
                 direction = "reduced" if delta < 0 else "increased"
                 notif_msg = (
                     f"We've updated how daily profit is calculated: it's now a flat "
-                    f"${DAILY_PROFIT_PER_100:.0f} per $100 you've deposited each day, "
+                    f"${DAILY_PROFIT_PER_100:.1f} per ${PROFIT_BASIS_USD:.0f} you've deposited each day, "
                     f"instead of compounding on your growing balance. As part of this "
                     f"change your balance has been {direction} by ${abs(delta):,.2f} "
                     f"to reflect the corrected amount. Your new balance is "
@@ -1932,7 +1941,8 @@ def scheduler_status():
         "next_run_utc":      next_run.isoformat(),
         "hours_until_run":   hours_left,
         "daily_profit_rate": DAILY_PROFIT_PER_100,
-        "profit_basis":      "flat $4.5 per $100 net deposited (non-compounding)",
+        "profit_basis":      f"flat ${DAILY_PROFIT_PER_100:.1f} per ${PROFIT_BASIS_USD:.0f} net deposited (non-compounding)",
+        "profit_basis_usd":  PROFIT_BASIS_USD,
         "min_balance":       MIN_BALANCE,
         "symbol":            TRADE_SYMBOL,
     })
@@ -1943,12 +1953,13 @@ start_scheduler()
 
 if __name__ == "__main__":
     print("\n" + "="*60)
-    print("   Summit Wealth v5.13 — $8 FLAT PROFIT PER $100 NET DEPOSITED")
+    print("   Summit Wealth v5.16 — $4.5 FLAT PROFIT PER $90 NET DEPOSITED")
     print("="*60)
     print(f"   URL    : http://127.0.0.1:8080")
     print(f"   Client : john@test.com  / demo1234")
     print(f"   Admin  : admin@test.com / admin1234")
-    print(f"   Rate   : ${DAILY_PROFIT_PER_100} per $100 net deposited/day (flat, non-compounding) at {TRADE_HOUR:02d}:00 UTC ({TRADE_HOUR+3:02d}:00 EAT)")
+    print(f"   Rate   : ${DAILY_PROFIT_PER_100} per ${PROFIT_BASIS_USD:.0f} net deposited/day (flat, non-compounding) at {TRADE_HOUR:02d}:00 UTC ({TRADE_HOUR+3:02d}:00 EAT)")
+    print(f"   Eligible min net deposit: ${MIN_BALANCE:.0f}")
     print(f"   Symbol : {TRADE_SYMBOL}")
     print(f"   Min Dep: $100  |  Min Withdrawal: $10  |  Ref Withdrawal: $16")
     print(f"   Binance: {'CONNECTED ✓' if bnb else 'fallback prices'}")

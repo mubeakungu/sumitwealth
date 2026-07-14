@@ -169,16 +169,13 @@
   <div class="charts-row">
     <div class="chart-card">
       <h3>Live Price Chart</h3>
-      <div class="chart-subtitle">Your trade activity for this symbol</div>
+      <div class="chart-subtitle">Real trade activity across BTC, ETH &amp; BNB (% change since first trade)</div>
       <div class="symbol-tabs" style="margin-bottom:10px;">
-        <button class="symbol-tab active" data-symbol="BTCUSDT" onclick="switchSymbol(this,'BTCUSDT')">BTC/USDT</button>
-        <button class="symbol-tab" data-symbol="ETHUSDT" onclick="switchSymbol(this,'ETHUSDT')">ETH/USDT</button>
-        <button class="symbol-tab" data-symbol="BNBUSDT" onclick="switchSymbol(this,'BNBUSDT')">BNB/USDT</button>
+        <button class="symbol-tab" id="tab-BTCUSDT" data-symbol="BTCUSDT" onclick="toggleSymbol(this,'BTCUSDT')">BTC/USDT</button>
+        <button class="symbol-tab" id="tab-ETHUSDT" data-symbol="ETHUSDT" onclick="toggleSymbol(this,'ETHUSDT')">ETH/USDT</button>
+        <button class="symbol-tab" id="tab-BNBUSDT" data-symbol="BNBUSDT" onclick="toggleSymbol(this,'BNBUSDT')">BNB/USDT</button>
       </div>
-      <div class="price-row">
-        <span class="price-val" id="livePriceVal">—</span>
-        <span class="price-chg up" id="livePriceChg">+0.00%</span>
-      </div>
+      <div class="price-row" id="priceRow" style="gap:22px;flex-wrap:wrap;align-items:flex-start;"></div>
       <canvas id="priceChart" height="140"></canvas>
     </div>
     <div class="chart-card">
@@ -377,8 +374,10 @@ function escHtml(s) {
 }
 
 let priceChart, plChart, balanceChart, txSummaryChart;
-let currentSymbol = 'BTCUSDT';
-let priceHistory = { BTCUSDT: [], ETHUSDT: [], BNBUSDT: [] };
+const symbolOrder = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT'];
+const symbolColors = { BTCUSDT: '#d4af37', ETHUSDT: '#4f9dff', BNBUSDT: '#a78bfa' };
+const symbolLabels = { BTCUSDT: 'BTC/USDT', ETHUSDT: 'ETH/USDT', BNBUSDT: 'BNB/USDT' };
+let visibleSymbols = { BTCUSDT: true, ETHUSDT: true, BNBUSDT: true };
 let allTradesCache = [];
 let stkPollTimer = null;
 
@@ -782,76 +781,107 @@ async function loadHistoryCharts() {
   });
 }
 
-// ── LIVE PRICE CHART — driven by the client's actual trade history ──────────
+// ── LIVE PRICE CHART — all three coins, driven by real trade history ────────
 //
-// FIX: the previous version polled a single "latest trade" every 15s and
-// pushed the same repeated price into the chart, so the line for a symbol
-// was flat unless a brand-new trade landed in that exact 15s window — it
-// never showed real trade activity for BTC/ETH/BNB.
-//
-// This version pulls ALL of the client's trades, filters by the selected
-// symbol, sorts them chronologically, and plots each trade's entry price
-// (and close price, if closed) as a point in sequence — so the graph
-// actually traces the trading activity for that currency. It still polls
-// periodically so newly opened/closed trades appear without a refresh.
-function buildSymbolPricePoints(symbol) {
-  return allTradesCache
-    .filter(t => t.symbol === symbol)
-    .sort((a, b) => (a.opened_at || '').localeCompare(b.opened_at || ''))
-    .flatMap(t => {
-      const pts = [];
-      if (t.entry_price != null) {
-        pts.push({ label: (t.opened_at || '').substring(0, 16).replace('T', ' '), price: t.entry_price });
-      }
-      if (t.status !== 'OPEN' && t.close_price != null) {
-        pts.push({ label: (t.closed_at || t.opened_at || '').substring(0, 16).replace('T', ' '), price: t.close_price });
-      }
-      return pts;
-    });
+// Shows BTC, ETH & BNB together on one chart. Since their prices are on
+// wildly different scales ($60k+ vs ~$3k vs ~$600), each line is plotted as
+// % change from that coin's own first trade — so the shapes/patterns are
+// directly comparable rather than BTC dwarfing the others. Each coin's tab
+// is a visibility toggle (all three on by default); the underlying data for
+// hidden coins stays loaded so toggling is instant and doesn't reshuffle
+// the x-axis.
+function buildAllSymbolSeries() {
+  const bySymbol = {};
+  symbolOrder.forEach(s => (bySymbol[s] = []));
+  allTradesCache.forEach(t => {
+    if (!bySymbol[t.symbol]) return;
+    if (t.entry_price != null) {
+      bySymbol[t.symbol].push({ time: t.opened_at || '', price: t.entry_price });
+    }
+    if (t.status !== 'OPEN' && t.close_price != null) {
+      bySymbol[t.symbol].push({ time: t.closed_at || t.opened_at || '', price: t.close_price });
+    }
+  });
+  symbolOrder.forEach(s => bySymbol[s].sort((a, b) => a.time.localeCompare(b.time)));
+  return bySymbol;
 }
 
-// Compute a tight y-axis range around the actual data so sparse trades (or
-// several trades at the same price) still render as a visible, readable
-// line/point instead of getting lost inside Chart.js's default auto-range
-// (which was stretching a flat/near-flat price out to a huge $64k–$72k
-// window, making it look "stagnant" even when it was rendering correctly).
-function computeYRange(data) {
-  if (!data.length) return { min: undefined, max: undefined };
-  const lo = Math.min(...data);
-  const hi = Math.max(...data);
-  if (lo === hi) {
-    // Single price (or every trade at the same price) — pad by 2% of the
-    // price itself so there's a visible band around the point.
-    const pad = Math.max(lo * 0.02, 1);
-    return { min: lo - pad, max: hi + pad };
-  }
-  // Real spread — add 15% headroom on each side so the line has room to
-  // breathe instead of hugging the top/bottom edge of the chart.
-  const pad = (hi - lo) * 0.15;
-  return { min: lo - pad, max: hi + pad };
+function styleSymbolTab(symbol) {
+  const el = document.getElementById('tab-' + symbol);
+  if (!el) return;
+  const active = visibleSymbols[symbol];
+  el.style.background = active ? symbolColors[symbol] : '#0a0e27';
+  el.style.color = active ? '#0a0e27' : '#aaa';
+  el.style.borderColor = active ? symbolColors[symbol] : '#333';
+  el.style.fontWeight = active ? 'bold' : 'normal';
 }
 
-function renderLivePriceChart(points) {
+function renderPriceRow(bySymbol) {
+  const html = symbolOrder.map(s => {
+    const series = bySymbol[s];
+    if (!series.length) {
+      return `<div><div style="color:${symbolColors[s]};font-weight:bold;font-size:12px;">${symbolLabels[s]}</div><div style="color:#555;font-size:13px;margin-top:4px;">No trades yet</div></div>`;
+    }
+    const first = series[0].price;
+    const last = series[series.length - 1].price;
+    const chg = first ? ((last - first) / first) * 100 : 0;
+    const chgClass = chg >= 0 ? 'up' : 'down';
+    return `<div>
+      <div style="color:${symbolColors[s]};font-weight:bold;font-size:12px;">${symbolLabels[s]}</div>
+      <div style="margin-top:4px;"><span class="price-val" style="font-size:16px;">$${fmt(last)}</span> <span class="price-chg ${chgClass}">${(chg >= 0 ? '+' : '')}${chg.toFixed(2)}%</span></div>
+    </div>`;
+  }).join('');
+  setHTML('priceRow', html);
+}
+
+function renderLivePriceChart(bySymbol) {
   const ctx = document.getElementById('priceChart').getContext('2d');
   Chart.defaults.color = '#666';
 
-  const labels = points.map(p => p.label);
-  const data = points.map(p => p.price);
-  const { min: yMin, max: yMax } = computeYRange(data);
+  // Union of every timestamp across all three coins keeps the x-axis stable
+  // regardless of which coins are toggled on/off.
+  const timeSet = new Set();
+  symbolOrder.forEach(s => bySymbol[s].forEach(p => timeSet.add(p.time)));
+  const times = [...timeSet].sort();
+  const labels = times.map(t => t.substring(0, 16).replace('T', ' '));
+
+  const datasets = symbolOrder.map(s => {
+    const series = bySymbol[s];
+    const base = series.length ? series[0].price : null;
+    const byTime = {};
+    series.forEach(p => { byTime[p.time] = p.price; });
+    const data = times.map(t => {
+      if (base == null || !(t in byTime)) return null;
+      return Math.round(((byTime[t] - base) / base) * 10000) / 100; // % change, 2dp
+    });
+    return {
+      label: symbolLabels[s],
+      data,
+      borderColor: symbolColors[s],
+      backgroundColor: symbolColors[s] + '20',
+      borderWidth: 2,
+      pointRadius: times.length <= 30 ? 3 : 0,
+      pointBackgroundColor: symbolColors[s],
+      fill: false,
+      tension: 0.3,
+      spanGaps: true,
+      hidden: !visibleSymbols[s]
+    };
+  });
 
   if (!priceChart) {
     priceChart = new Chart(ctx, {
       type: 'line',
-      data: {
-        labels,
-        datasets: [{ data, borderColor: '#d4af37', backgroundColor: 'rgba(212,175,55,0.08)', borderWidth: 2, pointRadius: points.length ? (points.length <= 30 ? 3 : 0) : 0, pointBackgroundColor: '#d4af37', fill: true, tension: 0.3 }]
-      },
+      data: { labels, datasets },
       options: {
         responsive: true, animation: false,
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => '$' + fmt(c.parsed.y) } } },
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: c => `${c.dataset.label}: ${c.parsed.y >= 0 ? '+' : ''}${c.parsed.y}%` } }
+        },
         scales: {
-          x: { display: points.length > 1, ticks: { font: { size: 9 }, maxTicksLimit: 6 }, grid: { display: false } },
-          y: { min: yMin, max: yMax, ticks: { callback: v => '$' + fmt(v), font: { size: 9 } }, grid: { color: '#1e2440' } }
+          x: { display: labels.length > 1, ticks: { font: { size: 9 }, maxTicksLimit: 6 }, grid: { display: false } },
+          y: { ticks: { callback: v => v + '%', font: { size: 9 } }, grid: { color: '#1e2440' } }
         }
       }
     });
@@ -860,60 +890,32 @@ function renderLivePriceChart(points) {
 
   // Update existing chart in place instead of destroy/recreate — avoids flicker.
   priceChart.data.labels = labels;
-  priceChart.data.datasets[0].data = data;
-  priceChart.data.datasets[0].pointRadius = points.length ? (points.length <= 30 ? 3 : 0) : 0;
-  priceChart.options.scales.y.min = yMin;
-  priceChart.options.scales.y.max = yMax;
-  priceChart.options.scales.x.display = points.length > 1;
-  priceChart.update('none'); // 'none' = no re-animation flash, just redraw the line
+  priceChart.data.datasets.forEach((ds, i) => {
+    ds.data = datasets[i].data;
+    ds.hidden = datasets[i].hidden;
+    ds.pointRadius = datasets[i].pointRadius;
+  });
+  priceChart.options.scales.x.display = labels.length > 1;
+  priceChart.update('none'); // 'none' = no re-animation flash, just redraw the lines
 }
 
 async function pollLivePrice() {
   const d = await api('/api/client/trades?status=');
   if (d.success) allTradesCache = d.data;
 
-  const points = buildSymbolPricePoints(currentSymbol);
-  priceHistory[currentSymbol] = points;
-
-  const valEl = document.getElementById('livePriceVal');
-  const chgEl = document.getElementById('livePriceChg');
-
-  if (!points.length) {
-    valEl.textContent = '—';
-    chgEl.textContent = '+0.00%';
-    chgEl.className = 'price-chg up';
-    renderLivePriceChart(points);
-    return;
-  }
-
-  const first = points[0].price;
-  const last = points[points.length - 1].price;
-  valEl.textContent = '$' + fmt(last);
-
-  const chg = first ? ((last - first) / first) * 100 : 0;
-  chgEl.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
-  chgEl.className = 'price-chg ' + (chg >= 0 ? 'up' : 'down');
-
-  renderLivePriceChart(points);
+  const bySymbol = buildAllSymbolSeries();
+  renderPriceRow(bySymbol);
+  renderLivePriceChart(bySymbol);
 }
 
-function switchSymbol(el, symbol) {
-  document.querySelectorAll('.symbol-tab').forEach(t => t.classList.remove('active'));
-  el.classList.add('active');
-  currentSymbol = symbol;
-
-  // Reset + destroy the chart instance when switching symbols so the old
-  // symbol's trade history doesn't bleed into the new symbol's chart.
-  priceHistory[currentSymbol] = [];
-  if (priceChart) { priceChart.destroy(); priceChart = null; }
-  document.getElementById('livePriceVal').textContent = '—';
-  document.getElementById('livePriceChg').textContent = '+0.00%';
-  document.getElementById('livePriceChg').className = 'price-chg up';
-
-  // Re-render immediately from the already-cached trades (no need to
-  // re-fetch), then let the regular poll cycle keep it fresh.
-  renderLivePriceChart(buildSymbolPricePoints(symbol));
-  pollLivePrice();
+function toggleSymbol(el, symbol) {
+  visibleSymbols[symbol] = !visibleSymbols[symbol];
+  styleSymbolTab(symbol);
+  if (priceChart) {
+    const idx = symbolOrder.indexOf(symbol);
+    priceChart.data.datasets[idx].hidden = !visibleSymbols[symbol];
+    priceChart.update('none');
+  }
 }
 
 // ── REFRESH / INIT ────────────────────────────────────────────────────────────
@@ -924,6 +926,7 @@ async function refreshAll() {
 }
 
 async function init() {
+  symbolOrder.forEach(styleSymbolTab);
   await loadSummary();
   await loadHistoryCharts();
   await loadNotifCount();

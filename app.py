@@ -1,8 +1,8 @@
 """
-Summit Wealth v5.13 - $8 PROFIT PER $100 BALANCE (8% daily)
+Summit Wealth v5.13 - $4.5 PROFIT PER $100 BALANCE (4.5% daily)
 - Scheduler starts at module level (works with gunicorn on Render)
 - One controlled trade per client per day
-- Trade profit scales: $8 per $100 of balance
+- Trade profit scales: $4.5 per $100 of balance
 - Realistic trade using real Binance prices
 - Referral system: 16% commission
 - Manual wallet for USDT deposits
@@ -125,7 +125,7 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL environment variable is not set!")
 
-DAILY_PROFIT_PER_100 = float(os.environ.get("DAILY_PROFIT_USD", "8.0"))
+DAILY_PROFIT_PER_100 = float(os.environ.get("DAILY_PROFIT_USD", "4.5"))
 MIN_BALANCE          = float(os.environ.get("MIN_BALANCE", "100.0"))
 TRADE_HOUR           = int(os.environ.get("TRADE_HOUR", "5"))
 TRADE_SYMBOL         = os.environ.get("TRADE_SYMBOL", "BTCUSDT")

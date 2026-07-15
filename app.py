@@ -77,6 +77,44 @@ Summit Wealth v5.13 - $4.5 PROFIT PER $100 BALANCE (4.5% daily)
             tied together by both hardcoding "100.0"; they are now two
             independent constants (MIN_BALANCE for eligibility,
             PROFIT_BASIS_USD for the profit-per-unit divisor).
+- NEW v5.17: Added GET /api/client/balance/history — a server-computed,
+            chronological running balance per client, built directly from
+            their own completed DEPOSIT/WITHDRAWAL/ADJUSTMENT transactions
+            plus daily_trade_log profit rows (the dashboard's "Balance Over
+            Time" chart now calls this instead of reconstructing balance
+            client-side in JS). Also fixed admin_adjust_balance and the
+            flat-profit migration endpoint, which previously stored
+            ADJUSTMENT amounts as abs(amount) — losing the direction of
+            negative corrections and silently breaking any balance
+            reconstruction. Both now store the true signed amount.
+- FIX v5.18: CRITICAL — net_deposit (deposits minus WITHDRAWAL-type
+            transactions) could go negative for any long-tenured, profitable
+            client, because withdrawing already-earned PROFIT is recorded
+            as the same 'WITHDRAWAL' transaction type as withdrawing
+            principal — there's no way to tell them apart at the database
+            level. Once a client's lifetime withdrawals exceeded their
+            lifetime deposits (which happens naturally as profit
+            accumulates and gets cashed out), net_deposit went negative and
+            STAYED negative — a fresh deposit only nudged the number
+            slightly, so the client could remain permanently below
+            MIN_BALANCE and locked out of daily trades no matter how much
+            they kept depositing, even though their real account balance
+            was healthy. net_deposit is now floored at $0 everywhere it's
+            computed (run_daily_trades, client_summary,
+            admin_run_single_client_trade, admin_migrate_flat_profit) via
+            SQL GREATEST(0, ...) / Python max(0.0, ...), so a new deposit
+            always restores eligibility as expected.
+- CHANGE v5.19: SUPERSEDES v5.18's floor-at-zero approach — withdrawals no
+            longer factor into the trade eligibility/profit basis AT ALL.
+            The basis (still called net_deposit in code/API for backward
+            compatibility) is now simply a client's GROSS total completed
+            deposits. This was requested directly: eligibility should be
+            based on total deposits only, full stop — the only guard is a
+            defensive check that refuses to trade a client whose deposit
+            total is somehow negative (which should never happen under
+            normal operation, since deposit amounts are always stored
+            positive), logging a warning and skipping them rather than
+            crediting profit off a nonsensical number.
 """
 
 import os, hashlib, secrets, datetime, uuid, logging, threading, random, base64
@@ -418,15 +456,21 @@ def run_daily_trades():
             "SELECT u.id, u.name, a.id AS account_id, a.balance, "
             "  COALESCE((SELECT SUM(amount_usd) FROM transactions "
             "            WHERE user_id=u.id AND type='DEPOSIT' AND status='COMPLETED'), 0) "
-            "  - COALESCE((SELECT SUM(amount_usd) FROM transactions "
-            "              WHERE user_id=u.id AND type='WITHDRAWAL' AND status='COMPLETED'), 0) "
             "  AS net_deposit "
             "FROM users u JOIN accounts a ON u.id=a.user_id "
             "WHERE u.role='client'"
         )
         all_clients = cur.fetchall()
-        clients = [c for c in all_clients if c["net_deposit"] >= MIN_BALANCE]
-        log.info(f"  Eligible clients (net deposit >= ${MIN_BALANCE}): {len(clients)}")
+        # Profit basis is now GROSS total completed deposits only — withdrawals
+        # (principal or profit) no longer reduce it. A client's deposit total
+        # should never legitimately be negative; this guard just refuses to
+        # trade anyone whose figure somehow is, rather than crediting profit
+        # off a nonsensical number.
+        clients = [c for c in all_clients if 0 <= c["net_deposit"] and c["net_deposit"] >= MIN_BALANCE]
+        skipped_negative = [c for c in all_clients if c["net_deposit"] < 0]
+        for c in skipped_negative:
+            log.warning(f"  Skipping {c['name']} — total deposit is negative (${c['net_deposit']:,.2f}), not trading")
+        log.info(f"  Eligible clients (total deposit >= ${MIN_BALANCE}): {len(clients)}")
         paid = 0
 
         for c in clients:
@@ -815,18 +859,6 @@ def client_summary():
         SELECT COALESCE(SUM(amount_usd), 0) AS s
         FROM transactions
         WHERE user_id = %s
-          AND type = 'WITHDRAWAL'
-          AND status = 'COMPLETED'
-        """,
-        (uid,)
-    )
-    principal_wdr = cur.fetchone()
-
-    cur.execute(
-        """
-        SELECT COALESCE(SUM(amount_usd), 0) AS s
-        FROM transactions
-        WHERE user_id = %s
           AND type IN ('WITHDRAWAL', 'REFERRAL_WITHDRAWAL')
           AND status = 'PENDING'
         """,
@@ -861,7 +893,12 @@ def client_summary():
     conn.close()
 
     balance        = a["balance"] if a else 0
-    net_deposit    = round(dep["s"] - principal_wdr["s"], 2)
+    # Profit basis is now the client's GROSS total completed deposits —
+    # withdrawals (principal or profit) no longer reduce it. A deposit
+    # total should never legitimately be negative; the guard below just
+    # refuses to treat a client as eligible off a nonsensical number rather
+    # than assuming that can't happen.
+    net_deposit    = dep["s"] if dep["s"] >= 0 else 0.0
     expected_daily = round((net_deposit / PROFIT_BASIS_USD) * DAILY_PROFIT_PER_100, 2) if net_deposit >= MIN_BALANCE else 0
 
     return ok({
@@ -983,6 +1020,72 @@ def client_trades():
     rows = cur.fetchall()
     cur.close(); conn.close()
     return ok([dict(r) for r in rows])
+
+@app.route("/api/client/balance/history")
+@login_required
+def client_balance_history():
+    """
+    Server-computed, chronological running balance for THIS client, built
+    directly from their own completed transactions (DEPOSIT +, WITHDRAWAL -,
+    ADJUSTMENT signed) plus daily_trade_log profit entries. Replaces the old
+    approach of reconstructing balance client-side in the dashboard JS,
+    which could drift (e.g. ADJUSTMENT used to store an unsigned amount).
+    REFERRAL_WITHDRAWAL is intentionally excluded — it only ever draws from
+    ref_balance, never the main trading balance.
+    """
+    uid  = session["user_id"]
+    conn = get_db()
+    cur  = conn.cursor()
+
+    cur.execute(
+        "SELECT type, amount_usd, created_at, completed_at FROM transactions "
+        "WHERE user_id=%s AND type IN ('DEPOSIT','WITHDRAWAL','ADJUSTMENT') "
+        "AND status='COMPLETED'",
+        (uid,)
+    )
+    txs = cur.fetchall()
+
+    cur.execute(
+        "SELECT profit, created_at FROM daily_trade_log WHERE user_id=%s",
+        (uid,)
+    )
+    trades = cur.fetchall()
+
+    cur.execute("SELECT balance FROM accounts WHERE user_id=%s", (uid,))
+    acct = cur.fetchone()
+    current_balance = acct["balance"] if acct else 0
+
+    cur.close()
+    conn.close()
+
+    events = []
+    for t in txs:
+        ts = t["completed_at"] or t["created_at"]
+        if t["type"] == "DEPOSIT":
+            delta = t["amount_usd"]
+        elif t["type"] == "WITHDRAWAL":
+            delta = -t["amount_usd"]
+        else:  # ADJUSTMENT — amount_usd is stored signed at source
+            delta = t["amount_usd"]
+        events.append((ts or "", delta))
+
+    for p in trades:
+        events.append((p["created_at"] or "", p["profit"]))
+
+    events.sort(key=lambda e: e[0])
+
+    running = 0.0
+    points  = []
+    for ts, delta in events:
+        running = round(running + delta, 2)
+        points.append({"date": ts[:10] if ts else "", "timestamp": ts, "balance": running})
+
+    # Always end on the true stored balance, so any legacy rows recorded
+    # before signed ADJUSTMENT amounts existed can't leave the chart's
+    # final point drifting from the client's real, current balance.
+    points.append({"date": "Now", "timestamp": _now(), "balance": current_balance})
+
+    return ok(points)
 
 @app.route("/api/client/profit/history")
 @login_required
@@ -1528,7 +1631,7 @@ def admin_adjust_balance(uid):
         "INSERT INTO transactions(id,user_id,account_id,type,method,amount_usd,"
         "reference,status,note,created_at,completed_at) "
         "VALUES(%s,%s,%s,'ADJUSTMENT','MANUAL',%s,%s,'COMPLETED',%s,%s,%s)",
-        (_uid(), uid, a["id"], abs(amount),
+        (_uid(), uid, a["id"], amount,
          "ADJ-"+secrets.token_hex(4).upper(), note, _now(), _now())
     )
     conn.commit()
@@ -1626,8 +1729,6 @@ def admin_run_single_client_trade():
         "SELECT u.id, u.name, a.id AS account_id, a.balance, "
         "  COALESCE((SELECT SUM(amount_usd) FROM transactions "
         "            WHERE user_id=u.id AND type='DEPOSIT' AND status='COMPLETED'), 0) "
-        "  - COALESCE((SELECT SUM(amount_usd) FROM transactions "
-        "              WHERE user_id=u.id AND type='WITHDRAWAL' AND status='COMPLETED'), 0) "
         "  AS net_deposit "
         "FROM users u JOIN accounts a ON u.id=a.user_id "
         "WHERE u.id=%s AND u.role='client'", (uid,)
@@ -1637,9 +1738,13 @@ def admin_run_single_client_trade():
         cur.close(); conn.close()
         return err("Client not found", 404)
 
+    if c["net_deposit"] < 0:
+        cur.close(); conn.close()
+        return err(f"Client total deposit is negative (${c['net_deposit']:.2f}) — refusing to trade")
+
     if c["net_deposit"] < MIN_BALANCE:
         cur.close(); conn.close()
-        return err(f"Client net deposit (${c['net_deposit']:.2f}) is below minimum (${MIN_BALANCE})")
+        return err(f"Client total deposit (${c['net_deposit']:.2f}) is below minimum (${MIN_BALANCE})")
 
     today = _today()
 
@@ -1776,13 +1881,10 @@ def admin_migrate_flat_profit():
         )
         deposits = cur.fetchone()["s"]
 
-        cur.execute(
-            "SELECT COALESCE(SUM(amount_usd),0) AS s FROM transactions "
-            "WHERE user_id=%s AND type='WITHDRAWAL' AND status='COMPLETED'", (uid,)
-        )
-        principal_withdrawals = cur.fetchone()["s"]
-
-        net_deposit = round(deposits - principal_withdrawals, 2)
+        # Profit basis is gross total deposits only — withdrawals no longer
+        # reduce it. Guard against a negative sum rather than assuming it
+        # can't happen.
+        net_deposit = deposits if deposits >= 0 else 0.0
 
         cur.execute(
             "SELECT id, profit FROM daily_trade_log WHERE user_id=%s ORDER BY date", (uid,)
@@ -1834,7 +1936,7 @@ def admin_migrate_flat_profit():
                     "INSERT INTO transactions(id,user_id,account_id,type,method,amount_usd,"
                     "reference,status,note,created_at,completed_at) "
                     "VALUES(%s,%s,%s,'ADJUSTMENT','MIGRATION',%s,%s,'COMPLETED',%s,%s,%s)",
-                    (_uid(), uid, c["account_id"], abs(delta),
+                    (_uid(), uid, c["account_id"], delta,
                      "MIG-" + secrets.token_hex(4).upper(), note, _now(), _now())
                 )
                 for row in trade_log_rows:

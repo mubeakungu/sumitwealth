@@ -115,6 +115,17 @@ Summit Wealth v5.13 - $4.5 PROFIT PER $100 BALANCE (4.5% daily)
             normal operation, since deposit amounts are always stored
             positive), logging a warning and skipping them rather than
             crediting profit off a nonsensical number.
+- CHANGE v5.20: Trade eligibility now ALSO requires the client's CURRENT
+            account balance to be >= MIN_BALANCE, in addition to gross total
+            deposits >= MIN_BALANCE (from v5.19). Closes the gap where a
+            client could deposit once, withdraw the full principal back out,
+            and keep earning daily profit indefinitely off a deposit total
+            that no longer reflects any real money in their account.
+            Applied in run_daily_trades(), admin_run_single_client_trade(),
+            and client_summary()'s daily_profit preview. The
+            admin_migrate_flat_profit() historical-correction tool is
+            intentionally left on deposit-total-only logic, since it can't
+            know a client's balance at each past trade date, only today's.
 """
 
 import os, hashlib, secrets, datetime, uuid, logging, threading, random, base64
@@ -461,16 +472,30 @@ def run_daily_trades():
             "WHERE u.role='client'"
         )
         all_clients = cur.fetchall()
-        # Profit basis is now GROSS total completed deposits only — withdrawals
-        # (principal or profit) no longer reduce it. A client's deposit total
-        # should never legitimately be negative; this guard just refuses to
-        # trade anyone whose figure somehow is, rather than crediting profit
-        # off a nonsensical number.
-        clients = [c for c in all_clients if 0 <= c["net_deposit"] and c["net_deposit"] >= MIN_BALANCE]
+        # Eligibility now requires BOTH:
+        #  1. Gross total completed deposits >= MIN_BALANCE (the profit basis)
+        #  2. CURRENT account balance >= MIN_BALANCE (real funds still in the
+        #     platform right now) — this stops a client from depositing once,
+        #     withdrawing the full principal back out, and continuing to earn
+        #     daily profit indefinitely off a deposit total that no longer
+        #     reflects any money actually sitting in their account.
+        # A deposit total should never legitimately be negative; that guard
+        # just refuses to trade anyone whose figure somehow is.
+        clients = [
+            c for c in all_clients
+            if 0 <= c["net_deposit"] and c["net_deposit"] >= MIN_BALANCE
+            and c["balance"] >= MIN_BALANCE
+        ]
         skipped_negative = [c for c in all_clients if c["net_deposit"] < 0]
         for c in skipped_negative:
             log.warning(f"  Skipping {c['name']} — total deposit is negative (${c['net_deposit']:,.2f}), not trading")
-        log.info(f"  Eligible clients (total deposit >= ${MIN_BALANCE}): {len(clients)}")
+        skipped_low_balance = [
+            c for c in all_clients
+            if c["net_deposit"] >= MIN_BALANCE and c["balance"] < MIN_BALANCE
+        ]
+        for c in skipped_low_balance:
+            log.info(f"  Skipping {c['name']} — deposit total qualifies but current balance (${c['balance']:,.2f}) is below ${MIN_BALANCE}")
+        log.info(f"  Eligible clients (total deposit >= ${MIN_BALANCE} AND balance >= ${MIN_BALANCE}): {len(clients)}")
         paid = 0
 
         for c in clients:
@@ -899,7 +924,7 @@ def client_summary():
     # refuses to treat a client as eligible off a nonsensical number rather
     # than assuming that can't happen.
     net_deposit    = dep["s"] if dep["s"] >= 0 else 0.0
-    expected_daily = round((net_deposit / PROFIT_BASIS_USD) * DAILY_PROFIT_PER_100, 2) if net_deposit >= MIN_BALANCE else 0
+    expected_daily = round((net_deposit / PROFIT_BASIS_USD) * DAILY_PROFIT_PER_100, 2) if (net_deposit >= MIN_BALANCE and balance >= MIN_BALANCE) else 0
 
     return ok({
         "name":                u["name"],
@@ -1745,6 +1770,10 @@ def admin_run_single_client_trade():
     if c["net_deposit"] < MIN_BALANCE:
         cur.close(); conn.close()
         return err(f"Client total deposit (${c['net_deposit']:.2f}) is below minimum (${MIN_BALANCE})")
+
+    if c["balance"] < MIN_BALANCE:
+        cur.close(); conn.close()
+        return err(f"Client current balance (${c['balance']:.2f}) is below minimum (${MIN_BALANCE}) — deposit total qualifies, but no funds are currently in the account")
 
     today = _today()
 

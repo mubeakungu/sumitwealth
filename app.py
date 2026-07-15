@@ -126,6 +126,23 @@ Summit Wealth v5.13 - $4.5 PROFIT PER $100 BALANCE (4.5% daily)
             admin_migrate_flat_profit() historical-correction tool is
             intentionally left on deposit-total-only logic, since it can't
             know a client's balance at each past trade date, only today's.
+- CHANGE v5.21: SUPERSEDES v5.16/v5.19/v5.20's deposit-based profit basis —
+            reverted to the ORIGINAL design stated at the top of this file:
+            profit is $4.5 per $100 of a client's CURRENT ACCOUNT BALANCE
+            (PROFIT_BASIS_USD default back to 100.0), not gross/net deposit
+            total. This is intentionally compounding — as profit is credited
+            to balance, the next day's profit is calculated off the new,
+            larger balance. This was requested directly, reversing the
+            "flat, non-compounding" rationale from v5.11. Eligibility is
+            now simply CURRENT balance >= MIN_BALANCE — the separate
+            deposit-total eligibility check from v5.19/v5.20 no longer
+            applies, since deposit total is no longer the profit basis.
+            Applied in run_daily_trades(), admin_run_single_client_trade(),
+            and client_summary()'s daily_profit preview.
+            admin_migrate_flat_profit() is a historical-correction tool for
+            the earlier deposit-based migration and is intentionally left
+            untouched — it is unrelated to this change and not expected to
+            be run again under the current (balance-based) formula.
 """
 
 import os, hashlib, secrets, datetime, uuid, logging, threading, random, base64
@@ -182,7 +199,7 @@ if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL environment variable is not set!")
 
 DAILY_PROFIT_PER_100 = float(os.environ.get("DAILY_PROFIT_USD", "4.5"))
-PROFIT_BASIS_USD     = float(os.environ.get("PROFIT_BASIS_USD", "90.0"))
+PROFIT_BASIS_USD     = float(os.environ.get("PROFIT_BASIS_USD", "100.0"))
 MIN_BALANCE          = float(os.environ.get("MIN_BALANCE", "100.0"))
 TRADE_HOUR           = int(os.environ.get("TRADE_HOUR", "5"))
 TRADE_SYMBOL         = os.environ.get("TRADE_SYMBOL", "BTCUSDT")
@@ -448,7 +465,7 @@ def run_daily_trades():
 
     try:
         today = _today()
-        log.info(f"=== Daily trade run: {today} — ${DAILY_PROFIT_PER_100} profit per ${PROFIT_BASIS_USD:.0f} net deposit ===")
+        log.info(f"=== Daily trade run: {today} — ${DAILY_PROFIT_PER_100} profit per ${PROFIT_BASIS_USD:.0f} account balance ===")
 
         price       = get_live_price(TRADE_SYMBOL)
         pct_gain    = random.uniform(0.003, 0.005)
@@ -464,42 +481,24 @@ def run_daily_trades():
         conn = get_db()
         cur  = conn.cursor()
         cur.execute(
-            "SELECT u.id, u.name, a.id AS account_id, a.balance, "
-            "  COALESCE((SELECT SUM(amount_usd) FROM transactions "
-            "            WHERE user_id=u.id AND type='DEPOSIT' AND status='COMPLETED'), 0) "
-            "  AS net_deposit "
+            "SELECT u.id, u.name, a.id AS account_id, a.balance "
             "FROM users u JOIN accounts a ON u.id=a.user_id "
             "WHERE u.role='client'"
         )
         all_clients = cur.fetchall()
-        # Eligibility now requires BOTH:
-        #  1. Gross total completed deposits >= MIN_BALANCE (the profit basis)
-        #  2. CURRENT account balance >= MIN_BALANCE (real funds still in the
-        #     platform right now) — this stops a client from depositing once,
-        #     withdrawing the full principal back out, and continuing to earn
-        #     daily profit indefinitely off a deposit total that no longer
-        #     reflects any money actually sitting in their account.
-        # A deposit total should never legitimately be negative; that guard
-        # just refuses to trade anyone whose figure somehow is.
-        clients = [
-            c for c in all_clients
-            if 0 <= c["net_deposit"] and c["net_deposit"] >= MIN_BALANCE
-            and c["balance"] >= MIN_BALANCE
-        ]
-        skipped_negative = [c for c in all_clients if c["net_deposit"] < 0]
-        for c in skipped_negative:
-            log.warning(f"  Skipping {c['name']} — total deposit is negative (${c['net_deposit']:,.2f}), not trading")
-        skipped_low_balance = [
-            c for c in all_clients
-            if c["net_deposit"] >= MIN_BALANCE and c["balance"] < MIN_BALANCE
-        ]
-        for c in skipped_low_balance:
-            log.info(f"  Skipping {c['name']} — deposit total qualifies but current balance (${c['balance']:,.2f}) is below ${MIN_BALANCE}")
-        log.info(f"  Eligible clients (total deposit >= ${MIN_BALANCE} AND balance >= ${MIN_BALANCE}): {len(clients)}")
+        # Profit basis is the client's CURRENT ACCOUNT BALANCE — eligibility
+        # is simply balance >= MIN_BALANCE. This is intentionally
+        # compounding: today's profit gets added to balance, so tomorrow's
+        # profit is calculated off the new, larger balance.
+        clients = [c for c in all_clients if c["balance"] >= MIN_BALANCE]
+        skipped = [c for c in all_clients if c["balance"] < MIN_BALANCE]
+        for c in skipped:
+            log.info(f"  Skipping {c['name']} — balance (${c['balance']:,.2f}) is below ${MIN_BALANCE}")
+        log.info(f"  Eligible clients (balance >= ${MIN_BALANCE}): {len(clients)}")
         paid = 0
 
         for c in clients:
-            client_profit   = round((c["net_deposit"] / PROFIT_BASIS_USD) * DAILY_PROFIT_PER_100, 2)
+            client_profit   = round((c["balance"] / PROFIT_BASIS_USD) * DAILY_PROFIT_PER_100, 2)
             client_quantity = round(client_profit / price_diff, 6)
 
             now              = datetime.datetime.utcnow()
@@ -538,7 +537,7 @@ def run_daily_trades():
                 )
                 conn.commit()
                 paid += 1
-                log.info(f"  ✓ {c['name']}: +${client_profit} (net deposit: ${c['net_deposit']:,.2f}, bal: ${c['balance']:,.2f})")
+                log.info(f"  ✓ {c['name']}: +${client_profit} (balance: ${c['balance']:,.2f})")
 
             except Exception as e:
                 conn.rollback()
@@ -917,14 +916,12 @@ def client_summary():
     cur.close()
     conn.close()
 
-    balance        = a["balance"] if a else 0
-    # Profit basis is now the client's GROSS total completed deposits —
-    # withdrawals (principal or profit) no longer reduce it. A deposit
-    # total should never legitimately be negative; the guard below just
-    # refuses to treat a client as eligible off a nonsensical number rather
-    # than assuming that can't happen.
+    balance     = a["balance"] if a else 0
+    # Profit basis is the client's CURRENT ACCOUNT BALANCE (see v5.21 note
+    # at top of file) — intentionally compounding, since credited profit
+    # raises balance, which raises the next day's profit in turn.
     net_deposit    = dep["s"] if dep["s"] >= 0 else 0.0
-    expected_daily = round((net_deposit / PROFIT_BASIS_USD) * DAILY_PROFIT_PER_100, 2) if (net_deposit >= MIN_BALANCE and balance >= MIN_BALANCE) else 0
+    expected_daily = round((balance / PROFIT_BASIS_USD) * DAILY_PROFIT_PER_100, 2) if balance >= MIN_BALANCE else 0
 
     return ok({
         "name":                u["name"],
@@ -1751,10 +1748,7 @@ def admin_run_single_client_trade():
     cur  = conn.cursor()
 
     cur.execute(
-        "SELECT u.id, u.name, a.id AS account_id, a.balance, "
-        "  COALESCE((SELECT SUM(amount_usd) FROM transactions "
-        "            WHERE user_id=u.id AND type='DEPOSIT' AND status='COMPLETED'), 0) "
-        "  AS net_deposit "
+        "SELECT u.id, u.name, a.id AS account_id, a.balance "
         "FROM users u JOIN accounts a ON u.id=a.user_id "
         "WHERE u.id=%s AND u.role='client'", (uid,)
     )
@@ -1763,17 +1757,10 @@ def admin_run_single_client_trade():
         cur.close(); conn.close()
         return err("Client not found", 404)
 
-    if c["net_deposit"] < 0:
-        cur.close(); conn.close()
-        return err(f"Client total deposit is negative (${c['net_deposit']:.2f}) — refusing to trade")
-
-    if c["net_deposit"] < MIN_BALANCE:
-        cur.close(); conn.close()
-        return err(f"Client total deposit (${c['net_deposit']:.2f}) is below minimum (${MIN_BALANCE})")
-
+    # Profit basis is CURRENT ACCOUNT BALANCE — see v5.21 note at top of file.
     if c["balance"] < MIN_BALANCE:
         cur.close(); conn.close()
-        return err(f"Client current balance (${c['balance']:.2f}) is below minimum (${MIN_BALANCE}) — deposit total qualifies, but no funds are currently in the account")
+        return err(f"Client balance (${c['balance']:.2f}) is below minimum (${MIN_BALANCE})")
 
     today = _today()
 
@@ -1792,7 +1779,7 @@ def admin_run_single_client_trade():
         cur.close(); conn.close()
         return err("Price diff was zero — try again")
 
-    client_profit   = round((c["net_deposit"] / PROFIT_BASIS_USD) * DAILY_PROFIT_PER_100, 2)
+    client_profit   = round((c["balance"] / PROFIT_BASIS_USD) * DAILY_PROFIT_PER_100, 2)
     client_quantity = round(client_profit / price_diff, 6)
 
     now              = datetime.datetime.utcnow()
@@ -1839,14 +1826,14 @@ def admin_run_single_client_trade():
     return ok({
         "message": f"Trade backfilled for {c['name']}: +${client_profit}",
         "profit": client_profit,
-        "net_deposit": c["net_deposit"],
+        "balance": c["balance"],
     })
 
 @app.route("/api/admin/trade/run", methods=["POST"])
 @admin_required
 def admin_run_trades():
     threading.Thread(target=run_daily_trades, daemon=True).start()
-    return ok({"message": f"Daily trades triggered — ${DAILY_PROFIT_PER_100} per ${PROFIT_BASIS_USD:.0f} net deposit"})
+    return ok({"message": f"Daily trades triggered — ${DAILY_PROFIT_PER_100} per ${PROFIT_BASIS_USD:.0f} account balance"})
 
 @app.route("/api/admin/trade/log")
 @admin_required
@@ -2072,7 +2059,7 @@ def scheduler_status():
         "next_run_utc":      next_run.isoformat(),
         "hours_until_run":   hours_left,
         "daily_profit_rate": DAILY_PROFIT_PER_100,
-        "profit_basis":      f"flat ${DAILY_PROFIT_PER_100:.1f} per ${PROFIT_BASIS_USD:.0f} net deposited (non-compounding)",
+        "profit_basis":      f"${DAILY_PROFIT_PER_100:.1f} per ${PROFIT_BASIS_USD:.0f} of current account balance (compounding)",
         "profit_basis_usd":  PROFIT_BASIS_USD,
         "min_balance":       MIN_BALANCE,
         "symbol":            TRADE_SYMBOL,
@@ -2084,13 +2071,13 @@ start_scheduler()
 
 if __name__ == "__main__":
     print("\n" + "="*60)
-    print("   Summit Wealth v5.16 — $4.5 FLAT PROFIT PER $90 NET DEPOSITED")
+    print("   Summit Wealth v5.21 — $4.5 PROFIT PER $100 ACCOUNT BALANCE")
     print("="*60)
     print(f"   URL    : http://127.0.0.1:8080")
     print(f"   Client : john@test.com  / demo1234")
     print(f"   Admin  : admin@test.com / admin1234")
-    print(f"   Rate   : ${DAILY_PROFIT_PER_100} per ${PROFIT_BASIS_USD:.0f} net deposited/day (flat, non-compounding) at {TRADE_HOUR:02d}:00 UTC ({TRADE_HOUR+3:02d}:00 EAT)")
-    print(f"   Eligible min net deposit: ${MIN_BALANCE:.0f}")
+    print(f"   Rate   : ${DAILY_PROFIT_PER_100} per ${PROFIT_BASIS_USD:.0f} of current balance/day (compounding) at {TRADE_HOUR:02d}:00 UTC ({TRADE_HOUR+3:02d}:00 EAT)")
+    print(f"   Eligible min balance: ${MIN_BALANCE:.0f}")
     print(f"   Symbol : {TRADE_SYMBOL}")
     print(f"   Min Dep: $100  |  Min Withdrawal: $10  |  Ref Withdrawal: $16")
     print(f"   Binance: {'CONNECTED ✓' if bnb else 'fallback prices'}")

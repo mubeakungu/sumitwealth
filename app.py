@@ -143,9 +143,18 @@ Summit Wealth v5.13 - $4.5 PROFIT PER $100 BALANCE (4.5% daily)
             the earlier deposit-based migration and is intentionally left
             untouched — it is unrelated to this change and not expected to
             be run again under the current (balance-based) formula.
+- CHANGE v5.22: Profit now only counts WHOLE $100 units of balance — a
+            partial remainder below $100 earns nothing extra. Previously
+            $613.11 was treated as 6.1311 units (profit = 613.11/100*4.5 =
+            $27.59); now it's floor(613.11/100) = 6 whole units, so
+            profit = 6*4.5 = $27.00 — the $13.11 remainder is simply not
+            counted until it grows into a full $100. Applied via
+            math.floor() in run_daily_trades(), admin_run_single_client_
+            trade(), and client_summary()'s daily_profit preview. Trade
+            eligibility (balance >= MIN_BALANCE) is unchanged.
 """
 
-import os, hashlib, secrets, datetime, uuid, logging, threading, random, base64
+import os, hashlib, secrets, datetime, uuid, logging, threading, random, base64, math
 import psycopg2
 import psycopg2.extras
 import requests as http_requests
@@ -498,7 +507,9 @@ def run_daily_trades():
         paid = 0
 
         for c in clients:
-            client_profit   = round((c["balance"] / PROFIT_BASIS_USD) * DAILY_PROFIT_PER_100, 2)
+            # Only whole $100 units of balance count — a partial remainder
+            # below $100 does not earn a partial profit.
+            client_profit   = round(math.floor(c["balance"] / PROFIT_BASIS_USD) * DAILY_PROFIT_PER_100, 2)
             client_quantity = round(client_profit / price_diff, 6)
 
             now              = datetime.datetime.utcnow()
@@ -921,7 +932,9 @@ def client_summary():
     # at top of file) — intentionally compounding, since credited profit
     # raises balance, which raises the next day's profit in turn.
     net_deposit    = dep["s"] if dep["s"] >= 0 else 0.0
-    expected_daily = round((balance / PROFIT_BASIS_USD) * DAILY_PROFIT_PER_100, 2) if balance >= MIN_BALANCE else 0
+    # Only whole $100 units of balance count toward profit — a remainder
+    # below $100 doesn't earn a partial amount (e.g. $613.11 → 6 units, not 6.1311).
+    expected_daily = round(math.floor(balance / PROFIT_BASIS_USD) * DAILY_PROFIT_PER_100, 2) if balance >= MIN_BALANCE else 0
 
     return ok({
         "name":                u["name"],
@@ -1779,7 +1792,9 @@ def admin_run_single_client_trade():
         cur.close(); conn.close()
         return err("Price diff was zero — try again")
 
-    client_profit   = round((c["balance"] / PROFIT_BASIS_USD) * DAILY_PROFIT_PER_100, 2)
+    # Only whole $100 units of balance count — a partial remainder below
+    # $100 does not earn a partial profit.
+    client_profit   = round(math.floor(c["balance"] / PROFIT_BASIS_USD) * DAILY_PROFIT_PER_100, 2)
     client_quantity = round(client_profit / price_diff, 6)
 
     now              = datetime.datetime.utcnow()

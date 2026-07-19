@@ -168,6 +168,23 @@ Summit Wealth v5.13 - $4.5 PROFIT PER $100 BALANCE (4.5% daily)
             deposit-based formula and correct their account balance to
             match — this is the tool to use for a client who, e.g., has 4
             days of trades logged at the wrong amount.
+- CHANGE v5.24: SUPERSEDES v5.23's gross-deposit-only basis — the profit
+            basis is now (total completed DEPOSITs − total completed
+            principal WITHDRAWALs), floored at $0, computed fresh from the
+            database on every trade run. REFERRAL_WITHDRAWAL is still
+            excluded (draws only from ref_balance). This was requested
+            directly: withdrawing deposited principal should immediately
+            stop that money from generating further profit. Because the
+            basis is recalculated live (not cached) every time
+            run_daily_trades()/admin_run_single_client_trade() executes,
+            the effect is immediate — the moment a withdrawal transaction
+            flips to COMPLETED (on admin approval), the very next trade
+            run reflects the reduced basis, with no separate "close the
+            trade" action needed. Applied in run_daily_trades(),
+            admin_run_single_client_trade(), client_summary(), and
+            admin_migrate_flat_profit() (for consistency, so the migration
+            tool corrects historical balances under the same formula the
+            live engine now uses).
 """
 
 import os, hashlib, secrets, datetime, uuid, logging, threading, random, base64, math
@@ -507,29 +524,33 @@ def run_daily_trades():
         cur  = conn.cursor()
         cur.execute(
             "SELECT u.id, u.name, a.id AS account_id, a.balance, "
-            "  COALESCE((SELECT SUM(amount_usd) FROM transactions "
-            "            WHERE user_id=u.id AND type='DEPOSIT' AND status='COMPLETED'), 0) "
-            "  AS total_deposit "
+            "  GREATEST(0, "
+            "    COALESCE((SELECT SUM(amount_usd) FROM transactions "
+            "              WHERE user_id=u.id AND type='DEPOSIT' AND status='COMPLETED'), 0) "
+            "    - COALESCE((SELECT SUM(amount_usd) FROM transactions "
+            "                WHERE user_id=u.id AND type='WITHDRAWAL' AND status='COMPLETED'), 0) "
+            "  ) AS total_deposit "
             "FROM users u JOIN accounts a ON u.id=a.user_id "
             "WHERE u.role='client'"
         )
         all_clients = cur.fetchall()
-        # Profit basis is GROSS TOTAL COMPLETED DEPOSITS only — current
-        # balance is not read for this calculation at all (v5.23). Only
-        # WHOLE $100 units of the deposit total count (v5.22 floor, kept):
-        # e.g. $450 deposited = 4 units = $18.00/day, not $20.25.
-        # A deposit total should never legitimately be negative; that guard
-        # just refuses to trade anyone whose figure somehow is.
-        clients = [c for c in all_clients if 0 <= c["total_deposit"] and c["total_deposit"] >= MIN_BALANCE]
-        skipped_negative = [c for c in all_clients if c["total_deposit"] < 0]
-        for c in skipped_negative:
-            log.warning(f"  Skipping {c['name']} — total deposit is negative (${c['total_deposit']:,.2f}), not trading")
-        log.info(f"  Eligible clients (total deposit >= ${MIN_BALANCE}): {len(clients)}")
+        # Profit basis is TOTAL DEPOSITS MINUS COMPLETED WITHDRAWALS, floored
+        # at $0 (v5.24). This is computed fresh from the database every time
+        # a trade runs, so the moment a withdrawal is approved (status flips
+        # to COMPLETED and the money leaves the account), the very next
+        # trade run — scheduled or manual — immediately reflects the
+        # reduced basis. A client who withdraws their full deposited amount
+        # drops straight to $0 basis and stops earning profit from that
+        # point on, with no lag. REFERRAL_WITHDRAWAL is intentionally
+        # excluded — it only ever draws from ref_balance, never principal.
+        # Current balance is still not read for the calculation itself.
+        clients = [c for c in all_clients if c["total_deposit"] >= MIN_BALANCE]
+        log.info(f"  Eligible clients (deposits - withdrawals >= ${MIN_BALANCE}): {len(clients)}")
         paid = 0
 
         for c in clients:
-            # Only whole $100 units of TOTAL DEPOSITS count — a partial
-            # remainder below $100 does not earn a partial profit.
+            # Only whole $100 units of (deposits - withdrawals) count — a
+            # partial remainder below $100 does not earn a partial profit.
             client_profit   = round(math.floor(c["total_deposit"] / PROFIT_BASIS_USD) * DAILY_PROFIT_PER_100, 2)
             client_quantity = round(client_profit / price_diff, 6)
 
@@ -915,6 +936,18 @@ def client_summary():
         SELECT COALESCE(SUM(amount_usd), 0) AS s
         FROM transactions
         WHERE user_id = %s
+          AND type = 'WITHDRAWAL'
+          AND status = 'COMPLETED'
+        """,
+        (uid,)
+    )
+    principal_wdr = cur.fetchone()
+
+    cur.execute(
+        """
+        SELECT COALESCE(SUM(amount_usd), 0) AS s
+        FROM transactions
+        WHERE user_id = %s
           AND type IN ('WITHDRAWAL', 'REFERRAL_WITHDRAWAL')
           AND status = 'PENDING'
         """,
@@ -949,10 +982,11 @@ def client_summary():
     conn.close()
 
     balance      = a["balance"] if a else 0
-    # Profit basis is GROSS TOTAL COMPLETED DEPOSITS only (v5.23) — current
-    # balance is not used for this calculation, only displayed above.
-    net_deposit  = dep["s"] if dep["s"] >= 0 else 0.0
-    # Only whole $100 units of the deposit total count toward profit — a
+    # Profit basis is TOTAL DEPOSITS MINUS COMPLETED WITHDRAWALS, floored at
+    # $0 (v5.24) — matches run_daily_trades()/admin_run_single_client_trade().
+    # Current balance is not used for this calculation, only displayed above.
+    net_deposit  = max(0.0, dep["s"] - principal_wdr["s"])
+    # Only whole $100 units of the basis count toward profit — a
     # remainder below $100 doesn't earn a partial amount.
     expected_daily = round(math.floor(net_deposit / PROFIT_BASIS_USD) * DAILY_PROFIT_PER_100, 2) if net_deposit >= MIN_BALANCE else 0
 
@@ -1782,9 +1816,12 @@ def admin_run_single_client_trade():
 
     cur.execute(
         "SELECT u.id, u.name, a.id AS account_id, a.balance, "
-        "  COALESCE((SELECT SUM(amount_usd) FROM transactions "
-        "            WHERE user_id=u.id AND type='DEPOSIT' AND status='COMPLETED'), 0) "
-        "  AS total_deposit "
+        "  GREATEST(0, "
+        "    COALESCE((SELECT SUM(amount_usd) FROM transactions "
+        "              WHERE user_id=u.id AND type='DEPOSIT' AND status='COMPLETED'), 0) "
+        "    - COALESCE((SELECT SUM(amount_usd) FROM transactions "
+        "                WHERE user_id=u.id AND type='WITHDRAWAL' AND status='COMPLETED'), 0) "
+        "  ) AS total_deposit "
         "FROM users u JOIN accounts a ON u.id=a.user_id "
         "WHERE u.id=%s AND u.role='client'", (uid,)
     )
@@ -1793,15 +1830,11 @@ def admin_run_single_client_trade():
         cur.close(); conn.close()
         return err("Client not found", 404)
 
-    # Profit basis is GROSS TOTAL COMPLETED DEPOSITS — see v5.23 note at
-    # top of file. Current balance is no longer read for this calculation.
-    if c["total_deposit"] < 0:
-        cur.close(); conn.close()
-        return err(f"Client total deposit is negative (${c['total_deposit']:.2f}) — refusing to trade")
-
+    # Profit basis is deposits minus completed withdrawals, floored at $0
+    # (v5.24) — see note at top of file.
     if c["total_deposit"] < MIN_BALANCE:
         cur.close(); conn.close()
-        return err(f"Client total deposit (${c['total_deposit']:.2f}) is below minimum (${MIN_BALANCE})")
+        return err(f"Client's deposits minus withdrawals (${c['total_deposit']:.2f}) is below minimum (${MIN_BALANCE})")
 
     today = _today()
 
@@ -1953,10 +1986,15 @@ def admin_migrate_flat_profit():
         )
         deposits = cur.fetchone()["s"]
 
-        # Profit basis is gross total deposits only — current balance is
-        # not read here. Guard against a negative sum rather than assuming
-        # it can't happen.
-        total_deposit = deposits if deposits >= 0 else 0.0
+        cur.execute(
+            "SELECT COALESCE(SUM(amount_usd),0) AS s FROM transactions "
+            "WHERE user_id=%s AND type='WITHDRAWAL' AND status='COMPLETED'", (uid,)
+        )
+        principal_withdrawals = cur.fetchone()["s"]
+
+        # Profit basis is deposits minus completed principal withdrawals,
+        # floored at $0 (v5.24) — matches the live trade engine.
+        total_deposit = max(0.0, deposits - principal_withdrawals)
 
         cur.execute(
             "SELECT id, profit FROM daily_trade_log WHERE user_id=%s ORDER BY date", (uid,)
@@ -1974,8 +2012,8 @@ def admin_migrate_flat_profit():
         if total_deposit < MIN_BALANCE or days_traded == 0:
             flat_daily = 0.0
         else:
-            # Only whole $100 units of total deposits count (matches the
-            # live formula's floor behavior).
+            # Only whole $100 units of (deposits - withdrawals) count
+            # (matches the live formula's floor behavior).
             flat_daily = round(math.floor(total_deposit / PROFIT_BASIS_USD) * DAILY_PROFIT_PER_100, 2)
 
         correct_total_profit = round(flat_daily * days_traded, 2)
@@ -2117,7 +2155,7 @@ def scheduler_status():
         "next_run_utc":      next_run.isoformat(),
         "hours_until_run":   hours_left,
         "daily_profit_rate": DAILY_PROFIT_PER_100,
-        "profit_basis":      f"${DAILY_PROFIT_PER_100:.1f} per ${PROFIT_BASIS_USD:.0f} of total deposits (whole $100 units only, non-compounding)",
+        "profit_basis":      f"${DAILY_PROFIT_PER_100:.1f} per ${PROFIT_BASIS_USD:.0f} of (deposits - withdrawals), whole $100 units only, non-compounding",
         "profit_basis_usd":  PROFIT_BASIS_USD,
         "min_balance":       MIN_BALANCE,
         "symbol":            TRADE_SYMBOL,
@@ -2134,7 +2172,7 @@ if __name__ == "__main__":
     print(f"   URL    : http://127.0.0.1:8080")
     print(f"   Client : john@test.com  / demo1234")
     print(f"   Admin  : admin@test.com / admin1234")
-    print(f"   Rate   : ${DAILY_PROFIT_PER_100} per ${PROFIT_BASIS_USD:.0f} of total deposits/day (whole $100 units only) at {TRADE_HOUR:02d}:00 UTC ({TRADE_HOUR+3:02d}:00 EAT)")
+    print(f"   Rate   : ${DAILY_PROFIT_PER_100} per ${PROFIT_BASIS_USD:.0f} of (deposits - withdrawals)/day (whole $100 units only) at {TRADE_HOUR:02d}:00 UTC ({TRADE_HOUR+3:02d}:00 EAT)")
     print(f"   Eligible min total deposit: ${MIN_BALANCE:.0f}")
     print(f"   Symbol : {TRADE_SYMBOL}")
     print(f"   Min Dep: $100  |  Min Withdrawal: $10  |  Ref Withdrawal: $16")

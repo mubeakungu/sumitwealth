@@ -16,6 +16,7 @@
     .btn-sm  { padding:5px 12px; font-size:11px; border-radius:4px; border:none; cursor:pointer; font-weight:bold; }
     .btn-green  { background:rgba(0,224,144,0.15); color:#00e090; border:1px solid #00e090 !important; }
     .btn-danger { background:rgba(255,69,96,0.15);  color:#ff4560; border:1px solid #ff4560 !important; }
+    .btn-sm:disabled { opacity:0.4; cursor:not-allowed; }
     .container { max-width:1400px; margin:0 auto; padding:25px 30px; }
     .stats { display:grid; grid-template-columns:repeat(6,1fr); gap:12px; margin-bottom:25px; }
     .stat  { background:#1a1f3a; border:1px solid #2a2f4a; padding:16px 18px; border-radius:8px; }
@@ -238,8 +239,15 @@
   <!-- CLIENTS -->
   <div id="clients" class="tab-content">
     <div class="panel">
-      <div class="panel-title">&#128100; All Clients</div>
-      <p style="color:#666;font-size:11px;margin:-10px 0 14px;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px; margin-bottom:4px;">
+        <div class="panel-title" style="margin-bottom:0;">&#128100; All Clients</div>
+        <button class="btn-sm"
+          style="background:rgba(255,196,0,0.12); border:1px solid #ffc800; color:#ffc800; padding:7px 14px;"
+          onclick="openMigrateModal()">
+          &#128295; Recalculate Client Profits
+        </button>
+      </div>
+      <p style="color:#666;font-size:11px;margin:10px 0 14px;">
         &#9432; Daily trades still run automatically every day — the
         <strong style="color:#00e090;">Run Trade</strong> button below is only for
         backfilling a client who was missed on a specific day (e.g. a DB outage),
@@ -507,7 +515,7 @@
   </div>
 </div>
 
-<!-- RUN MISSED TRADE MODAL (NEW) -->
+<!-- RUN MISSED TRADE MODAL -->
 <div class="modal-overlay" id="runTradeModal">
   <div class="modal">
     <h3>&#128200; Run Missed Trade</h3>
@@ -530,6 +538,37 @@
       <button class="btn" style="background:#333;color:#aaa;" onclick="closeModal('runTradeModal')">Cancel</button>
       <button class="btn btn-green" style="border:1px solid #00e090;" onclick="confirmRunTrade()" id="runTradeConfirmBtn">
         &#9989; Run Trade Now
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- RECALCULATE CLIENT PROFITS MODAL (NEW) -->
+<div class="modal-overlay" id="migrateModal">
+  <div class="modal" style="width:680px;">
+    <h3>&#128295; Recalculate Client Profits</h3>
+    <p style="color:#aaa;font-size:13px;margin-bottom:14px;">
+      Recomputes <strong>every client's</strong> historical daily trade profit under
+      the current formula (<span style="color:#d4af37;">$4.5 per $100 of deposits minus
+      withdrawals, whole $100 units only</span>) and corrects their balance + trade log
+      to match. Use this after a profit formula change to fix balances that were
+      credited under an older formula.
+    </p>
+    <div style="background:rgba(255,69,96,0.08);border:1px solid rgba(255,69,96,0.35);border-radius:6px;padding:10px 12px;margin-bottom:16px;font-size:11px;color:#ff9c9c;line-height:1.6;">
+      &#9888; This affects <strong>all clients at once</strong> and cannot be undone
+      automatically. Review the numbers below carefully before applying.
+    </div>
+
+    <div id="migrateSummary" style="font-size:12px;color:#aaa;margin-bottom:10px;"></div>
+    <div id="migrateResults" class="loading">Running dry run...</div>
+
+    <div class="alert alert-error"   id="migrateErr"></div>
+    <div class="alert alert-success" id="migrateOk"></div>
+
+    <div class="modal-btns">
+      <button class="btn" style="background:#333;color:#aaa;" onclick="closeModal('migrateModal')">Cancel</button>
+      <button class="btn btn-red" onclick="confirmMigrate()" id="migrateApplyBtn" disabled>
+        &#9888; Apply Correction to All Clients
       </button>
     </div>
   </div>
@@ -1132,7 +1171,7 @@ async function saveClientEdit() {
   }, 1500);
 }
 
-// ── RESET CLIENT PASSWORD (previously missing — now wired to the backend) ───
+// ── RESET CLIENT PASSWORD ────────────────────────────────────────────────────
 async function resetClientPassword() {
   const uid    = document.getElementById('editClientId').value;
   const newPw  = document.getElementById('resetPwNew').value;
@@ -1176,7 +1215,7 @@ async function resetClientPassword() {
   }
 }
 
-// ── RUN MISSED TRADE (NEW — single-client backfill, scheduler untouched) ────
+// ── RUN MISSED TRADE (single-client backfill, scheduler untouched) ──────────
 function openRunTradeModal(uid) {
   const c = _clientMap[uid];
   if (!c) return;
@@ -1207,6 +1246,110 @@ async function confirmRunTrade() {
   } catch (e) {
     showError('Network error — please try again', 'runTradeErr');
   } finally {
+    btn.disabled = false;
+    btn.innerHTML = originalLabel;
+  }
+}
+
+// ── RECALCULATE CLIENT PROFITS (NEW — global flat-profit migration) ─────────
+// Opens the modal, immediately runs a dry run (POST with no body) against
+// /api/admin/migrate/flat-profit, and renders a per-client preview table of
+// what WOULD change. The "Apply" button only becomes active once the dry
+// run has loaded and at least one client actually needs a correction; it
+// then re-calls the same endpoint with {apply:true} to commit it for real.
+let _migrateDryRunLoaded = false;
+
+function openMigrateModal() {
+  _migrateDryRunLoaded = false;
+  document.getElementById('migrateErr').classList.remove('show');
+  document.getElementById('migrateOk').classList.remove('show');
+  document.getElementById('migrateApplyBtn').disabled = true;
+  document.getElementById('migrateSummary').textContent = '';
+  setHTML('migrateResults', '<div class="loading">Running dry run...</div>');
+  document.getElementById('migrateModal').classList.add('show');
+  runMigrateDryRun();
+}
+
+async function runMigrateDryRun() {
+  try {
+    const d = await post('/api/admin/migrate/flat-profit', {});
+    if (!d.success) {
+      showError(d.error || 'Dry run failed', 'migrateErr');
+      setHTML('migrateResults', '<div class="empty">Failed to load.</div>');
+      return;
+    }
+    _migrateDryRunLoaded = true;
+    renderMigrateResults(d.data);
+  } catch (e) {
+    showError('Network error — please try again', 'migrateErr');
+    setHTML('migrateResults', '<div class="empty">Failed to load.</div>');
+  }
+}
+
+function renderMigrateResults(data) {
+  const needsCorrection = data.results.filter(r => Math.abs(r.delta) >= 0.01);
+
+  const deltaColor = data.total_delta < 0 ? '#ff4560' : '#00e090';
+  document.getElementById('migrateSummary').innerHTML =
+    `<strong style="color:#ffc800;">${needsCorrection.length}</strong> of ${data.results.length} client(s) need correction` +
+    (needsCorrection.length
+      ? ` — net balance change: <strong style="color:${deltaColor};">${data.total_delta >= 0 ? '+' : ''}$${fmt(data.total_delta)}</strong>`
+      : '');
+
+  document.getElementById('migrateApplyBtn').disabled = needsCorrection.length === 0;
+
+  if (!needsCorrection.length) {
+    setHTML('migrateResults', '<div class="empty">&#9989; Everyone already matches the current formula — nothing to correct.</div>');
+    return;
+  }
+
+  let html = `<div style="max-height:320px;overflow-y:auto;">
+    <table class="tbl"><thead><tr>
+      <th>Client</th><th>Days</th><th>Old Profit</th><th>Correct Profit</th><th>Balance Change</th>
+    </tr></thead><tbody>`;
+  needsCorrection.forEach(r => {
+    const rowDeltaColor = r.delta < 0 ? '#ff4560' : '#00e090';
+    html += `<tr>
+      <td style="font-weight:bold;">${escHtml(r.name)}</td>
+      <td style="text-align:center;color:#aaa;">${r.days_traded}</td>
+      <td style="color:#aaa;">$${fmt(r.old_total_profit)}</td>
+      <td style="color:#d4af37;">$${fmt(r.correct_total_profit)}</td>
+      <td style="color:${rowDeltaColor};font-weight:bold;">${r.delta >= 0 ? '+' : ''}$${fmt(r.delta)}</td>
+    </tr>`;
+  });
+  html += '</tbody></table></div>';
+  setHTML('migrateResults', html);
+}
+
+async function confirmMigrate() {
+  if (!_migrateDryRunLoaded) return;
+
+  if (!confirm('This will correct balances for ALL clients shown above and cannot be undone automatically. Continue?')) {
+    return;
+  }
+
+  const btn = document.getElementById('migrateApplyBtn');
+  const originalLabel = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = 'Applying...';
+
+  try {
+    const d = await post('/api/admin/migrate/flat-profit', { apply: true });
+    if (!d.success) {
+      showError(d.error || 'Correction failed', 'migrateErr');
+      btn.disabled = false;
+      btn.innerHTML = originalLabel;
+      return;
+    }
+    showSuccess(
+      `Correction applied — ${d.data.clients_needing_correction} client(s) updated, net change $${fmt(d.data.total_delta)}`,
+      'migrateOk'
+    );
+    setHTML('migrateResults', '<div class="empty">&#9989; Correction applied. Client balances and trade logs updated.</div>');
+    document.getElementById('migrateSummary').textContent = '';
+    await refreshData();
+  } catch (e) {
+    showError('Network error — please try again', 'migrateErr');
     btn.disabled = false;
     btn.innerHTML = originalLabel;
   }
@@ -1385,4 +1528,3 @@ init();
 </script>
 </body>
 </html>
-Done

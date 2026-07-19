@@ -8,7 +8,1536 @@
     body { font-family:Arial,sans-serif; background:#0a0e27; color:#fff; }
     .navbar { background:#1a1f3a; padding:14px 30px; border-bottom:2px solid #d4af37; display:flex; justify-content:space-between; align-items:center; }
     .nav-brand { font-size:18px; color:#d4af37; font-weight:bold; }
+    .nav-right  { displa<!DOCTYPE html>
+<html>
+<head>
+  <title>Summit Wealth — Admin</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family:Arial,sans-serif; background:#0a0e27; color:#fff; }
+    .navbar { background:#1a1f3a; padding:14px 30px; border-bottom:2px solid #d4af37; display:flex; justify-content:space-between; align-items:center; }
+    .nav-brand { font-size:18px; color:#d4af37; font-weight:bold; }
     .nav-right  { display:flex; align-items:center; gap:15px; }
+    .admin-badge { background:rgba(212,175,55,0.15); border:1px solid #d4af37; color:#d4af37; font-size:11px; padding:3px 10px; border-radius:20px; }
+    .btn     { padding:8px 18px; border:none; border-radius:5px; cursor:pointer; font-size:13px; font-weight:bold; }
+    .btn-red { background:#ff4560; color:#fff; }
+    .btn-gold{ background:#d4af37; color:#0a0e27; }
+    .btn-sm  { padding:5px 12px; font-size:11px; border-radius:4px; border:none; cursor:pointer; font-weight:bold; }
+    .btn-green  { background:rgba(0,224,144,0.15); color:#00e090; border:1px solid #00e090 !important; }
+    .btn-danger { background:rgba(255,69,96,0.15);  color:#ff4560; border:1px solid #ff4560 !important; }
+    .btn-sm:disabled { opacity:0.4; cursor:not-allowed; }
+    .container { max-width:1400px; margin:0 auto; padding:25px 30px; }
+    .stats { display:grid; grid-template-columns:repeat(6,1fr); gap:12px; margin-bottom:25px; }
+    .stat  { background:#1a1f3a; border:1px solid #2a2f4a; padding:16px 18px; border-radius:8px; }
+    .stat-label { font-size:10px; color:#aaa; text-transform:uppercase; letter-spacing:0.5px; }
+    .stat-val   { font-size:20px; color:#d4af37; font-weight:bold; margin-top:8px; }
+    .stat-sub   { font-size:11px; margin-top:4px; color:#aaa; }
+    .tabs { display:flex; gap:5px; margin-bottom:20px; flex-wrap:wrap; }
+    .tab  { padding:10px 20px; background:#1a1f3a; border:1px solid #333; cursor:pointer; color:#aaa; border-radius:5px; font-size:13px; }
+    .tab.active { background:#d4af37; color:#0a0e27; font-weight:bold; border-color:#d4af37; }
+    .panel { background:#1a1f3a; border:1px solid #2a2f4a; padding:22px; border-radius:8px; overflow-x:auto; }
+    .tab-content { display:none; }
+    .tab-content.show { display:block; }
+    .panel-title { font-size:15px; font-weight:bold; color:#d4af37; margin-bottom:18px; }
+    .tbl { width:100%; border-collapse:collapse; font-size:12px; }
+    .tbl th { padding:10px 12px; text-align:left; color:#d4af37; background:rgba(212,175,55,0.08); border-bottom:1px solid #333; white-space:nowrap; }
+    .tbl td { padding:10px 12px; border-bottom:1px solid #1e2440; vertical-align:middle; white-space:nowrap; }
+    .tbl tr:hover td { background:rgba(255,255,255,0.02); }
+    .badge { display:inline-block; padding:2px 8px; border-radius:20px; font-size:10px; font-weight:bold; text-transform:uppercase; }
+    .badge-pending   { background:rgba(255,200,0,0.15);   color:#ffc800; }
+    .badge-completed { background:rgba(0,224,144,0.15);   color:#00e090; }
+    .badge-rejected  { background:rgba(255,69,96,0.15);   color:#ff4560; }
+    .badge-open      { background:rgba(0,136,255,0.15);   color:#0088ff; }
+    .badge-closed    { background:rgba(150,150,150,0.15); color:#aaa; }
+    .badge-credited  { background:rgba(212,175,55,0.15);  color:#d4af37; }
+    .badge-mpesa     { background:rgba(0,165,80,0.2);     color:#00a550; border:1px solid #00a550; }
+    .type-deposit    { color:#00e090; font-weight:bold; }
+    .type-withdrawal { color:#ff4560; font-weight:bold; }
+    .type-adjustment { color:#d4af37; font-weight:bold; }
+    .type-referral   { color:#a78bfa; font-weight:bold; }
+    .filter-bar { display:flex; gap:10px; margin-bottom:15px; flex-wrap:wrap; align-items:center; }
+    .filter-bar input, .filter-bar select { background:#0a0e27; border:1px solid #333; color:#fff; padding:7px 12px; border-radius:5px; font-size:12px; }
+    .filter-bar input { flex:1; min-width:200px; }
+    .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:1000; justify-content:center; align-items:center; }
+    .modal-overlay.show { display:flex; }
+    .modal { background:#1a1f3a; border:1px solid #d4af37; border-radius:10px; padding:28px; width:480px; max-width:95vw; max-height:90vh; overflow-y:auto; }
+    .modal h3 { color:#d4af37; margin-bottom:18px; font-size:15px; }
+    .form-group { margin-bottom:14px; }
+    .form-group label { display:block; font-size:11px; color:#aaa; margin-bottom:5px; }
+    .form-group input, .form-group select, .form-group textarea { width:100%; padding:9px 12px; background:#0a0e27; border:1px solid #333; color:#fff; border-radius:5px; font-size:13px; }
+    .form-group input:focus, .form-group textarea:focus { outline:none; border-color:#d4af37; }
+    .form-group textarea { resize:vertical; height:80px; }
+    .modal-btns { display:flex; gap:10px; margin-top:18px; justify-content:flex-end; }
+    .alert { padding:10px 14px; border-radius:5px; margin-bottom:14px; font-size:12px; display:none; }
+    .alert.show { display:block; }
+    .alert-success { background:rgba(0,224,144,0.1); border:1px solid #00e090; color:#00e090; }
+    .alert-error   { background:rgba(255,69,96,0.1);  border:1px solid #ff4560; color:#ff4560; }
+    .charts-row { display:grid; grid-template-columns:1fr 1fr; gap:15px; margin-bottom:25px; }
+    .chart-card { background:#1a1f3a; border:1px solid #2a2f4a; border-radius:8px; padding:18px; }
+    .chart-card h3 { font-size:13px; color:#d4af37; margin-bottom:4px; }
+    .chart-subtitle { font-size:11px; color:#666; margin-bottom:14px; }
+    .empty   { text-align:center; padding:40px 20px; color:#555; font-size:13px; }
+    .loading { text-align:center; padding:30px; color:#aaa; font-size:13px; }
+    .client-totals { display:flex; gap:18px; flex-wrap:wrap; margin-top:16px; padding-top:14px; border-top:1px solid #2a2f4a; }
+    .ct-item { font-size:12px; }
+    .ct-label { color:#666; margin-right:4px; }
+    .wallet-check-bar { display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; flex-wrap:wrap; gap:10px; }
+    .wallet-links { display:flex; gap:8px; flex-wrap:wrap; }
+    .wallet-link { display:inline-flex; align-items:center; gap:5px; padding:6px 14px; background:rgba(212,175,55,0.08); border:1px solid #d4af37; color:#d4af37; border-radius:5px; font-size:11px; text-decoration:none; transition:background 0.2s; }
+    .wallet-link:hover { background:rgba(212,175,55,0.2); }
+    .wallet-link.not-set { border-color:#333; color:#555; pointer-events:none; }
+
+    /* ── M-Pesa panel in approve modal ── */
+    .mpesa-verify-panel {
+      display:none;
+      background:linear-gradient(135deg,rgba(0,165,80,0.1) 0%,rgba(0,100,47,0.06) 100%);
+      border:1px solid #00a550;
+      border-radius:8px; padding:14px 16px; margin:14px 0;
+    }
+    .mpesa-verify-panel.show { display:block; }
+    .mpesa-verify-title { color:#00a550; font-size:12px; font-weight:bold; margin-bottom:10px; letter-spacing:0.5px; }
+    .mpesa-verify-row   { display:flex; justify-content:space-between; font-size:12px; margin-bottom:6px; }
+    .mpesa-verify-label { color:#666; }
+    .mpesa-verify-val   { color:#00e090; font-weight:bold; font-family:monospace; }
+
+    /* ── M-Pesa note pill in table ── */
+    .mpesa-note {
+      display:inline-block; background:rgba(0,165,80,0.12);
+      border:1px solid rgba(0,165,80,0.4); color:#00a550;
+      border-radius:4px; padding:2px 8px; font-size:10px;
+      font-family:monospace; white-space:normal; word-break:break-all;
+      max-width:180px; vertical-align:middle;
+    }
+
+    /* ── Scheduler status pill (top right) ── */
+    .sched-pill {
+      display:inline-flex; align-items:center; gap:6px;
+      font-size:11px; padding:4px 10px; border-radius:20px;
+      border:1px solid #2a2f4a; color:#aaa;
+    }
+    .sched-dot { width:7px; height:7px; border-radius:50%; background:#555; }
+    .sched-dot.on { background:#00e090; box-shadow:0 0 6px #00e090; }
+
+    @media(max-width:900px) { .stats{grid-template-columns:repeat(2,1fr);} .charts-row{grid-template-columns:1fr;} }
+  </style>
+</head>
+<body>
+
+<div class="navbar">
+  <div class="nav-brand">&#128176; SUMMIT WEALTH — Admin</div>
+  <div class="nav-right">
+    <span class="sched-pill" id="schedPill"><span class="sched-dot" id="schedDot"></span><span id="schedText">Scheduler: —</span></span>
+    <span style="font-size:11px;color:#555;" id="lastRefreshed"></span>
+    <span class="admin-badge">&#128737; ADMIN</span>
+    <button class="btn btn-red" onclick="logout()">Logout</button>
+  </div>
+</div>
+
+<div style="max-width:1400px; margin:10px auto; padding:0 30px;">
+  <div class="alert alert-success" id="globalSuccess"></div>
+  <div class="alert alert-error"   id="globalError"></div>
+</div>
+
+<div class="container">
+
+  <!-- STATS -->
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-label">Total Clients</div>
+      <div class="stat-val" id="statClients">—</div>
+      <div class="stat-sub">Registered users</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Total Deposits</div>
+      <div class="stat-val">$<span id="statDeposits">0.00</span></div>
+      <div class="stat-sub">Completed</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Total Withdrawals</div>
+      <div class="stat-val">$<span id="statWithdrawals">0.00</span></div>
+      <div class="stat-sub">Completed</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Pending Deposits</div>
+      <div class="stat-val" id="statPending" style="color:#ffc800;">—</div>
+      <div class="stat-sub">Awaiting approval</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Total Profit Paid</div>
+      <div class="stat-val" style="color:#00e090;">$<span id="statProfitPaid">0.00</span></div>
+      <div class="stat-sub"><span id="statTradesToday">0</span> trades today</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Referral Commissions</div>
+      <div class="stat-val" style="color:#a78bfa;">$<span id="statRefs">0.00</span></div>
+      <div class="stat-sub"><span id="statRefCount">0</span> referrals</div>
+    </div>
+  </div>
+
+  <!-- CHARTS -->
+  <div class="charts-row">
+    <div class="chart-card">
+      <h3>Monthly Deposits vs Withdrawals</h3>
+      <div class="chart-subtitle">All completed transactions by month</div>
+      <canvas id="txChart" height="160"></canvas>
+    </div>
+    <div class="chart-card">
+      <h3>Client Growth</h3>
+      <div class="chart-subtitle">Cumulative registrations over time</div>
+      <canvas id="clientChart" height="160"></canvas>
+    </div>
+  </div>
+
+  <!-- TABS -->
+  <div class="tabs">
+    <button class="tab active" data-tab="pending" onclick="switchTab(this,'pending')">
+      &#9888; Pending Deposits
+      <span id="pendingCount" style="background:#ff4560;color:#fff;border-radius:20px;padding:1px 7px;font-size:10px;margin-left:5px;display:none;"></span>
+    </button>
+    <button class="tab" data-tab="pendingWdr" onclick="switchTab(this,'pendingWdr')">
+      &#9888; Pending Withdrawals
+      <span id="pendingWdrCount" style="background:#ff4560;color:#fff;border-radius:20px;padding:1px 7px;font-size:10px;margin-left:5px;display:none;"></span>
+    </button>
+    <button class="tab" data-tab="clients"      onclick="switchTab(this,'clients')">&#128100; Clients</button>
+    <button class="tab" data-tab="transactions" onclick="switchTab(this,'transactions')">&#9776; Transactions</button>
+    <button class="tab" data-tab="referrals"    onclick="switchTab(this,'referrals')">&#128279; Referrals</button>
+    <button class="tab" data-tab="trades"       onclick="switchTab(this,'trades')">&#128200; Trades</button>
+    <button class="tab" data-tab="adjust"       onclick="switchTab(this,'adjust')">&#9881; Adjust Balance</button>
+  </div>
+
+  <!-- PENDING DEPOSITS -->
+  <div id="pending" class="tab-content show">
+    <div class="panel">
+      <div class="wallet-check-bar">
+        <div class="panel-title" style="margin-bottom:0;">&#9888; Pending Deposit Approvals</div>
+        <div class="wallet-links">
+          <a id="walletTRC20" href="#" target="_blank" class="wallet-link not-set">&#128279; Check TRC20 Wallet</a>
+          <a id="walletBEP20" href="#" target="_blank" class="wallet-link not-set">&#128279; Check BEP20 Wallet</a>
+          <a id="walletERC20" href="#" target="_blank" class="wallet-link not-set">&#128279; Check ERC20 Wallet</a>
+          <!-- NEW: M-Pesa quick link -->
+          <a href="https://www.safaricom.co.ke/personal/m-pesa/m-pesa-app" target="_blank"
+             class="wallet-link" style="border-color:#00a550;color:#00a550;background:rgba(0,165,80,0.08);">
+            &#128247; Check M-Pesa
+          </a>
+        </div>
+      </div>
+      <div id="pendingList" class="loading">Loading...</div>
+    </div>
+  </div>
+
+  <!-- PENDING WITHDRAWALS -->
+  <div id="pendingWdr" class="tab-content">
+    <div class="panel">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px; margin-bottom:18px;">
+        <div class="panel-title" style="margin-bottom:0;">&#9888; Pending Withdrawal Approvals</div>
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          <div style="background:rgba(255,69,96,0.08); border:1px solid rgba(255,69,96,0.4); border-radius:6px; padding:8px 14px; font-size:11px; line-height:1.7;">
+            <div style="color:#ff4560; font-weight:bold;">&#128181; ACCOUNT WITHDRAWAL</div>
+            <div style="color:#aaa;">Trading balance. Send exact USDT to client address.</div>
+          </div>
+          <div style="background:rgba(167,139,250,0.08); border:1px solid rgba(167,139,250,0.4); border-radius:6px; padding:8px 14px; font-size:11px; line-height:1.7;">
+            <div style="color:#a78bfa; font-weight:bold;">&#127381; REFERRAL WITHDRAWAL</div>
+            <div style="color:#aaa;">Referral commission (16%). Send exact USDT.</div>
+          </div>
+        </div>
+      </div>
+      <div id="pendingWdrList" class="loading">Loading...</div>
+    </div>
+  </div>
+
+  <!-- CLIENTS -->
+  <div id="clients" class="tab-content">
+    <div class="panel">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px; margin-bottom:4px;">
+        <div class="panel-title" style="margin-bottom:0;">&#128100; All Clients</div>
+        <button class="btn-sm"
+          style="background:rgba(255,196,0,0.12); border:1px solid #ffc800; color:#ffc800; padding:7px 14px;"
+          onclick="openMigrateModal()">
+          &#128295; Recalculate Client Profits
+        </button>
+      </div>
+      <p style="color:#666;font-size:11px;margin:10px 0 14px;">
+        &#9432; Daily trades still run automatically every day — the
+        <strong style="color:#00e090;">Run Trade</strong> button below is only for
+        backfilling a client who was missed on a specific day (e.g. a DB outage),
+        and is blocked if that client already has a trade logged for today.
+      </p>
+      <div class="filter-bar">
+        <input type="text" id="clientSearch" placeholder="Search by name or email..." oninput="filterClients()">
+      </div>
+      <div id="clientList" class="loading">Loading...</div>
+      <div class="client-totals" id="clientTotals" style="display:none;">
+        <div class="ct-item"><span class="ct-label">Platform Balances:</span><span id="ctBalance" style="color:#00e090;font-weight:bold;"></span></div>
+        <div class="ct-item"><span class="ct-label">Total Equity:</span><span id="ctEquity" style="color:#d4af37;font-weight:bold;"></span></div>
+        <div class="ct-item"><span class="ct-label">Total Deposited:</span><span id="ctDeposits" style="color:#00e090;font-weight:bold;"></span></div>
+        <div class="ct-item"><span class="ct-label">Total Withdrawn:</span><span id="ctWithdrawals" style="color:#ff4560;font-weight:bold;"></span></div>
+        <div class="ct-item"><span class="ct-label">Total Profits:</span><span id="ctProfits" style="color:#d4af37;font-weight:bold;"></span></div>
+        <div class="ct-item"><span class="ct-label">Total Ref Earned:</span><span id="ctRefEarned" style="color:#a78bfa;font-weight:bold;"></span></div>
+        <div class="ct-item"><span class="ct-label">Total Generated:</span><span id="ctGenerated" style="color:#ffc800;font-weight:bold;"></span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TRANSACTIONS -->
+  <div id="transactions" class="tab-content">
+    <div class="panel">
+      <div class="panel-title">&#9776; All Transactions</div>
+      <div class="filter-bar">
+        <input type="text" id="txSearch" placeholder="Search name, reference..." oninput="filterTx()">
+        <select id="txTypeFilter" onchange="filterTx()">
+          <option value="">All Types</option>
+          <option value="DEPOSIT">Deposits</option>
+          <option value="WITHDRAWAL">Withdrawals</option>
+          <option value="REFERRAL_WITHDRAWAL">Referral Withdrawals</option>
+          <option value="ADJUSTMENT">Adjustments</option>
+        </select>
+        <select id="txStatusFilter" onchange="filterTx()">
+          <option value="">All Statuses</option>
+          <option value="PENDING">Pending</option>
+          <option value="COMPLETED">Completed</option>
+          <option value="REJECTED">Rejected</option>
+        </select>
+      </div>
+      <div id="txList" class="loading">Loading...</div>
+    </div>
+  </div>
+
+  <!-- REFERRALS -->
+  <div id="referrals" class="tab-content">
+    <div class="panel">
+      <div class="panel-title">&#128279; Referral Commissions</div>
+      <div id="referralList" class="loading">Loading...</div>
+    </div>
+  </div>
+
+  <!-- TRADES -->
+  <div id="trades" class="tab-content">
+    <div class="panel">
+      <div class="panel-title">&#128200; All Trades</div>
+      <div class="filter-bar">
+        <select id="tradeStatusFilter" onchange="loadTrades()">
+          <option value="">All</option>
+          <option value="OPEN">Open</option>
+          <option value="CLOSED">Closed</option>
+        </select>
+      </div>
+      <div id="tradeList" class="loading">Loading...</div>
+    </div>
+  </div>
+
+  <!-- ADJUST -->
+  <div id="adjust" class="tab-content">
+    <div class="panel" style="max-width:520px;">
+      <div class="panel-title">&#9881; Manually Adjust Client</div>
+      <p style="color:#666;font-size:11px;margin:-10px 0 14px;">
+        Choose which figure to adjust for this client, then enter a positive
+        amount to add or a negative amount to subtract. The note is required
+        and is recorded against this adjustment.
+      </p>
+      <div class="form-group">
+        <label>Select Client</label>
+        <select id="adjustClient" onchange="updateAdjustCurrentValue()"><option value="">— Select client —</option></select>
+      </div>
+      <div class="form-group">
+        <label>Field to Adjust</label>
+        <select id="adjustField" onchange="updateAdjustCurrentValue()">
+          <option value="balance">Balance</option>
+          <option value="equity">Equity</option>
+          <option value="total_deposits">Total Deposits</option>
+          <option value="total_withdrawals">Total Withdrawals</option>
+          <option value="total_profit">Trade Profit</option>
+          <option value="total_ref_earned">Referral Earnings</option>
+          <option value="ref_balance">Referral Balance (withdrawable)</option>
+        </select>
+      </div>
+      <div id="adjustCurrentVal" style="font-size:11px;color:#666;margin:-8px 0 14px;">Current value: —</div>
+      <div class="form-group">
+        <label>Amount (positive = credit/increase, negative = debit/decrease)</label>
+        <input type="number" id="adjustAmount" placeholder="e.g. 500 or -200">
+      </div>
+      <div class="form-group">
+        <label>Note / Reason</label>
+        <textarea id="adjustNote" placeholder="e.g. Profit credit, Bonus, Correction..."></textarea>
+      </div>
+      <div class="alert alert-success" id="adjustSuccess"></div>
+      <div class="alert alert-error"   id="adjustError"></div>
+      <button class="btn btn-gold" style="width:100%;padding:12px;font-size:14px;" onclick="submitAdjust()">Apply Adjustment</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- APPROVE DEPOSIT MODAL -->
+<div class="modal-overlay" id="approveModal">
+  <div class="modal">
+    <h3>&#9989; Approve Deposit</h3>
+    <p style="color:#aaa;font-size:13px;margin-bottom:18px;">Confirm you have received the funds. This will credit the client's account.</p>
+
+    <div style="background:#0a0e27;border:1px solid #2a2f4a;border-radius:6px;padding:14px;margin-bottom:14px;font-size:13px;line-height:2.1;">
+      <div><span style="color:#aaa;">Client:</span> <strong id="modalClientName"></strong></div>
+      <div><span style="color:#aaa;">Amount:</span> <span id="modalAmount" style="color:#00e090;font-weight:bold;"></span></div>
+      <div><span style="color:#aaa;">Method:</span> <span id="modalNetwork"></span></div>
+      <div><span style="color:#aaa;">Address:</span> <span id="modalAddress" style="font-family:monospace;font-size:11px;color:#aaa;"></span></div>
+      <div><span style="color:#aaa;">Reference:</span> <span id="modalRef" style="font-size:11px;color:#aaa;"></span></div>
+    </div>
+
+    <!-- NEW: M-Pesa verification panel — shown only for MPESA deposits -->
+    <div class="mpesa-verify-panel" id="mpesaVerifyPanel">
+      <div class="mpesa-verify-title">&#128247; M-PESA VERIFICATION DETAILS</div>
+      <div class="mpesa-verify-row">
+        <span class="mpesa-verify-label">KES Amount Sent:</span>
+        <span class="mpesa-verify-val" id="mpesaVerifyKes">—</span>
+      </div>
+      <div class="mpesa-verify-row">
+        <span class="mpesa-verify-label">Transaction Code:</span>
+        <span class="mpesa-verify-val" id="mpesaVerifyRef">—</span>
+      </div>
+      <div style="margin-top:10px;font-size:11px;color:#666;line-height:1.6;">
+        &#9888; Verify this transaction on your M-Pesa statement before approving.
+        Check that the KES amount and transaction code above match what you received.
+      </div>
+    </div>
+
+    <input type="hidden" id="modalTxId">
+    <div class="modal-btns">
+      <button class="btn" style="background:#333;color:#aaa;" onclick="closeModal('approveModal')">Cancel</button>
+      <button class="btn btn-gold" onclick="confirmApprove()">&#9989; Approve &amp; Credit</button>
+    </div>
+  </div>
+</div>
+
+<!-- REJECT DEPOSIT MODAL -->
+<div class="modal-overlay" id="rejectModal">
+  <div class="modal">
+    <h3>&#10060; Reject Deposit</h3>
+    <p style="color:#aaa;font-size:13px;margin-bottom:18px;">The client account will NOT be credited.</p>
+    <div class="form-group">
+      <label>Reason for rejection</label>
+      <textarea id="rejectReason" placeholder="e.g. Transaction not found in wallet, Wrong network..."></textarea>
+    </div>
+    <input type="hidden" id="rejectTxId">
+    <div class="modal-btns">
+      <button class="btn" style="background:#333;color:#aaa;" onclick="closeModal('rejectModal')">Cancel</button>
+      <button class="btn btn-red" onclick="confirmReject()">&#10060; Reject</button>
+    </div>
+  </div>
+</div>
+
+<!-- APPROVE WITHDRAWAL MODAL -->
+<div class="modal-overlay" id="approveWdrModal">
+  <div class="modal">
+    <h3>&#9989; Approve Withdrawal</h3>
+    <p style="color:#aaa;font-size:13px;margin-bottom:18px;">Send the exact USDT to the client's wallet, then click Approve.</p>
+    <div style="background:#0a0e27;border:1px solid #2a2f4a;border-radius:6px;padding:14px;margin-bottom:18px;font-size:13px;line-height:2.2;">
+      <div><span style="color:#aaa;">Client:</span> <strong id="wdrModalClientName"></strong></div>
+      <div><span style="color:#aaa;">Type:</span> <span id="wdrModalTypeBadge"></span></div>
+      <div><span style="color:#aaa;">Amount:</span> <span id="wdrModalAmount" style="font-size:17px;font-weight:bold;"></span> <span style="color:#aaa;font-size:11px;">USDT</span></div>
+      <div><span style="color:#aaa;">Network:</span> <span id="wdrModalNetwork" style="color:#d4af37;font-weight:bold;"></span></div>
+      <div>
+        <span style="color:#aaa;">Send To:</span>
+        <span id="wdrModalAddress" style="font-family:monospace;font-size:11px;color:#d4af37;"></span>
+        <button onclick="copyAddr(document.getElementById('wdrModalAddress').textContent)"
+          style="margin-left:8px;padding:2px 8px;background:#333;border:1px solid #555;color:#aaa;border-radius:3px;cursor:pointer;font-size:10px;">
+          &#128203; Copy
+        </button>
+      </div>
+      <div><span style="color:#aaa;">Reference:</span> <span id="wdrModalRef" style="font-size:11px;color:#555;"></span></div>
+    </div>
+    <input type="hidden" id="wdrModalTxId">
+    <div class="modal-btns">
+      <button class="btn" style="background:#333;color:#aaa;" onclick="closeModal('approveWdrModal')">Cancel</button>
+      <button class="btn btn-gold" onclick="confirmWdrApprove()">&#9989; I've Sent — Approve</button>
+    </div>
+  </div>
+</div>
+
+<!-- REJECT WITHDRAWAL MODAL -->
+<div class="modal-overlay" id="rejectWdrModal">
+  <div class="modal">
+    <h3>&#10060; Reject Withdrawal</h3>
+    <p style="color:#aaa;font-size:13px;margin-bottom:18px;">The withdrawal will be cancelled. Client balance stays unchanged.</p>
+    <div class="form-group">
+      <label>Reason for rejection</label>
+      <textarea id="rejectWdrReason" placeholder="e.g. Invalid address, Suspicious activity..."></textarea>
+    </div>
+    <input type="hidden" id="rejectWdrTxId">
+    <div class="modal-btns">
+      <button class="btn" style="background:#333;color:#aaa;" onclick="closeModal('rejectWdrModal')">Cancel</button>
+      <button class="btn btn-red" onclick="confirmWdrReject()">&#10060; Reject</button>
+    </div>
+  </div>
+</div>
+
+<!-- EDIT CLIENT MODAL -->
+<div class="modal-overlay" id="editClientModal">
+  <div class="modal">
+    <h3>&#9998; Edit Client Details</h3>
+    <p style="color:#aaa;font-size:13px;margin-bottom:18px;">
+      Update the client's name, email or phone number.
+    </p>
+    <input type="hidden" id="editClientId">
+    <div class="form-group">
+      <label>Full Name</label>
+      <input type="text" id="editClientName" placeholder="Full name">
+    </div>
+    <div class="form-group">
+      <label>Email Address</label>
+      <input type="email" id="editClientEmail" placeholder="email@example.com">
+    </div>
+    <div class="form-group">
+      <label>Phone Number</label>
+      <input type="text" id="editClientPhone" placeholder="+254 7xx xxx xxx">
+    </div>
+    <div class="alert alert-error"   id="editClientErr"></div>
+    <div class="alert alert-success" id="editClientOk"></div>
+    <div class="modal-btns">
+      <button class="btn" style="background:#333;color:#aaa;"
+              onclick="closeModal('editClientModal')">Cancel</button>
+      <button class="btn btn-gold" onclick="saveClientEdit()">
+        &#9989; Save Changes
+      </button>
+    </div>
+
+    <!-- RESET PASSWORD SECTION -->
+    <div style="margin-top:22px;padding-top:18px;border-top:1px solid #2a2f4a;">
+      <h3 style="font-size:13px;color:#ff4560;margin-bottom:4px;">&#128273; Reset Password</h3>
+      <p style="color:#aaa;font-size:11px;margin-bottom:14px;">
+        Sets a new password directly for this client — no PIN or old password
+        required. Use this if a client is locked out or forgot their credentials.
+      </p>
+      <div class="form-group">
+        <label>New Password</label>
+        <input type="password" id="resetPwNew" placeholder="Min 6 characters" autocomplete="new-password">
+      </div>
+      <div class="form-group" style="display:flex;align-items:center;gap:8px;">
+        <input type="checkbox" id="resetPwNotify" checked style="width:auto;">
+        <label style="margin:0;font-size:12px;color:#aaa;">Notify client in-app that their password was reset</label>
+      </div>
+      <div class="alert alert-error"   id="resetPwErr"></div>
+      <div class="alert alert-success" id="resetPwOk"></div>
+      <div class="modal-btns">
+        <button class="btn btn-red" style="width:100%;" onclick="resetClientPassword()" id="resetPwBtn">
+          &#128273; Reset Password
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- RUN MISSED TRADE MODAL -->
+<div class="modal-overlay" id="runTradeModal">
+  <div class="modal">
+    <h3>&#128200; Run Missed Trade</h3>
+    <p style="color:#aaa;font-size:13px;margin-bottom:18px;">
+      Backfills <strong>today's</strong> trade for this client only. Use this if their
+      automatic daily trade was skipped (e.g. the database was unavailable at run time).
+      The daily scheduler itself is untouched and will keep running normally for everyone else.
+    </p>
+    <div style="background:#0a0e27;border:1px solid #2a2f4a;border-radius:6px;padding:14px;margin-bottom:14px;font-size:13px;line-height:2.1;">
+      <div><span style="color:#aaa;">Client:</span> <strong id="runTradeClientName"></strong></div>
+      <div><span style="color:#aaa;">Net Deposit:</span> <span id="runTradeNetDeposit" style="color:#d4af37;font-weight:bold;"></span></div>
+    </div>
+    <div style="background:rgba(255,200,0,0.08);border:1px solid rgba(255,200,0,0.35);border-radius:6px;padding:10px 12px;margin-bottom:14px;font-size:11px;color:#ffc800;line-height:1.6;">
+      &#9888; This is blocked automatically if the client already has a trade logged
+      for today, so it cannot be used to double-pay someone.
+    </div>
+    <div class="alert alert-error" id="runTradeErr"></div>
+    <input type="hidden" id="runTradeUid">
+    <div class="modal-btns">
+      <button class="btn" style="background:#333;color:#aaa;" onclick="closeModal('runTradeModal')">Cancel</button>
+      <button class="btn btn-green" style="border:1px solid #00e090;" onclick="confirmRunTrade()" id="runTradeConfirmBtn">
+        &#9989; Run Trade Now
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- RECALCULATE CLIENT PROFITS MODAL (NEW) -->
+<div class="modal-overlay" id="migrateModal">
+  <div class="modal" style="width:680px;">
+    <h3>&#128295; Recalculate Client Profits</h3>
+    <p style="color:#aaa;font-size:13px;margin-bottom:14px;">
+      Recomputes <strong>every client's</strong> historical daily trade profit under
+      the current formula (<span style="color:#d4af37;">$4.5 per $100 of deposits minus
+      withdrawals, whole $100 units only</span>) and corrects their balance + trade log
+      to match. Use this after a profit formula change to fix balances that were
+      credited under an older formula.
+    </p>
+    <div style="background:rgba(255,69,96,0.08);border:1px solid rgba(255,69,96,0.35);border-radius:6px;padding:10px 12px;margin-bottom:16px;font-size:11px;color:#ff9c9c;line-height:1.6;">
+      &#9888; This affects <strong>all clients at once</strong> and cannot be undone
+      automatically. Review the numbers below carefully before applying.
+    </div>
+
+    <div id="migrateSummary" style="font-size:12px;color:#aaa;margin-bottom:10px;"></div>
+    <div id="migrateResults" class="loading">Running dry run...</div>
+
+    <div class="alert alert-error"   id="migrateErr"></div>
+    <div class="alert alert-success" id="migrateOk"></div>
+
+    <div class="modal-btns">
+      <button class="btn" style="background:#333;color:#aaa;" onclick="closeModal('migrateModal')">Cancel</button>
+      <button class="btn btn-red" onclick="confirmMigrate()" id="migrateApplyBtn" disabled>
+        &#9888; Apply Correction to All Clients
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+const api  = (url,opts={}) => fetch(url,{credentials:'same-origin',...opts}).then(r=>r.json());
+const post = (u,b) => api(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+const fmt  = n => parseFloat(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmtD = n => '$' + fmt(n);
+
+// ── SAFE DATA STORE ───────────────────────────────────────────────────────────
+const _txMap     = {};
+const _clientMap = {};
+
+function storeTx(tx)    { _txMap[tx.id]    = tx; }
+function storeClient(c) { _clientMap[c.id] = c; }
+
+function setHTML(el, html) {
+  if (typeof el === 'string') el = document.getElementById(el);
+  if (el && el.innerHTML !== html) el.innerHTML = html;
+}
+
+// ── STATE ─────────────────────────────────────────────────────────────────────
+let allTx = [], allClients = [];
+let txChart, clientChart;
+let activeTab = 'pending';
+
+// ── LOGOUT ────────────────────────────────────────────────────────────────────
+async function logout() {
+  await post('/api/auth/logout', {});
+  window.location.href = '/admin';
+}
+
+// ── ALERTS ────────────────────────────────────────────────────────────────────
+function showSuccess(msg, id='globalSuccess') {
+  const el = document.getElementById(id);
+  el.textContent = '✓ ' + msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 4000);
+}
+function showError(msg, id='globalError') {
+  const el = document.getElementById(id);
+  el.textContent = '✗ ' + msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 5000);
+}
+
+// ── TABS ──────────────────────────────────────────────────────────────────────
+function switchTab(btn, name) {
+  document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('show'));
+  document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+  document.getElementById(name).classList.add('show');
+  btn.classList.add('active');
+  activeTab = name;
+  if (name === 'pending')      renderPending(allTx);
+  if (name === 'pendingWdr')   renderPendingWithdrawals(allTx);
+  if (name === 'clients')      renderClients(allClients);
+  if (name === 'transactions') renderTx(allTx);
+  if (name === 'referrals')    loadReferrals();
+  if (name === 'trades')       loadTrades();
+  if (name === 'adjust')       populateAdjustClients();
+}
+
+// ── STATS ─────────────────────────────────────────────────────────────────────
+async function loadStats() {
+  const d = await api('/api/admin/stats');
+  if (!d.success) { window.location.href = '/admin'; return; }
+  const s = d.data;
+  document.getElementById('statClients').textContent     = s.clients;
+  document.getElementById('statDeposits').textContent    = fmt(s.deposits);
+  document.getElementById('statWithdrawals').textContent = fmt(s.withdrawals);
+  document.getElementById('statPending').textContent     = s.pending_deposits;
+  document.getElementById('statProfitPaid').textContent  = fmt(s.total_profit_paid || 0);
+  document.getElementById('statTradesToday').textContent = s.trades_today || 0;
+  document.getElementById('statRefs').textContent        = fmt(s.ref_commissions || 0);
+  document.getElementById('statRefCount').textContent    = s.total_referrals || 0;
+
+  const pc = document.getElementById('pendingCount');
+  if (s.pending_deposits > 0) { pc.textContent = s.pending_deposits; pc.style.display = 'inline'; }
+  else pc.style.display = 'none';
+
+  const wc = document.getElementById('pendingWdrCount');
+  if (s.pending_withdrawals > 0) { wc.textContent = s.pending_withdrawals; wc.style.display = 'inline'; }
+  else wc.style.display = 'none';
+
+  const dot = document.getElementById('schedDot');
+  const txt = document.getElementById('schedText');
+  if (s.scheduler_running) {
+    dot.classList.add('on');
+    txt.textContent = `Scheduler: running (${s.trades_today || 0} trades today)`;
+  } else {
+    dot.classList.remove('on');
+    txt.textContent = 'Scheduler: not running';
+  }
+
+  document.getElementById('lastRefreshed').textContent =
+    'Last updated: ' + new Date().toLocaleTimeString();
+}
+
+// ── WALLET LINKS ──────────────────────────────────────────────────────────────
+async function loadWalletLinks() {
+  const explorerBase = {
+    TRC20: addr => `https://tronscan.org/#/address/${addr}`,
+    BEP20: addr => `https://bscscan.com/address/${addr}`,
+    ERC20: addr => `https://etherscan.io/address/${addr}`,
+  };
+  for (const net of ['TRC20', 'BEP20', 'ERC20']) {
+    try {
+      const d = await api('/api/client/deposit/address?network=' + net);
+      const el = document.getElementById('wallet' + net);
+      if (!el) continue;
+      if (d.success && d.data && d.data.address) {
+        el.href = explorerBase[net](d.data.address);
+        el.title = 'Wallet: ' + d.data.address;
+        el.classList.remove('not-set');
+      } else {
+        el.classList.add('not-set');
+        el.title = net + ' wallet not configured';
+      }
+    } catch(e) {}
+  }
+}
+
+// ── CHARTS ────────────────────────────────────────────────────────────────────
+function buildCharts(transactions, clients) {
+  Chart.defaults.color = '#666';
+  Chart.defaults.borderColor = '#1e2440';
+
+  const months = {};
+  transactions.filter(t => t.status === 'COMPLETED').forEach(t => {
+    const mo = (t.created_at || '').substring(0, 7);
+    if (!mo) return;
+    if (!months[mo]) months[mo] = { dep: 0, wdr: 0 };
+    if (t.type === 'DEPOSIT') months[mo].dep += t.amount_usd;
+    if (t.type === 'WITHDRAWAL' || t.type === 'REFERRAL_WITHDRAWAL') months[mo].wdr += t.amount_usd;
+  });
+  const moLabels = Object.keys(months).sort();
+  if (!moLabels.length) { moLabels.push(new Date().toISOString().substring(0, 7)); months[moLabels[0]] = { dep: 0, wdr: 0 }; }
+
+  if (txChart) txChart.destroy();
+  txChart = new Chart(document.getElementById('txChart').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: moLabels,
+      datasets: [
+        { label: 'Deposits',    data: moLabels.map(m => months[m].dep), backgroundColor: 'rgba(0,224,144,0.7)', borderRadius: 4 },
+        { label: 'Withdrawals', data: moLabels.map(m => months[m].wdr), backgroundColor: 'rgba(255,69,96,0.7)',  borderRadius: 4 },
+      ]
+    },
+    options: {
+      responsive: true, animation: false,
+      plugins: { legend: { labels: { color: '#aaa', font: { size: 11 }, boxWidth: 12 } }, tooltip: { callbacks: { label: c => '$' + fmt(c.parsed.y) } } },
+      scales: { x: { ticks: { font: { size: 9 } }, grid: { color: '#1e2440' } }, y: { ticks: { callback: v => '$' + fmt(v), font: { size: 9 } }, grid: { color: '#1e2440' } } }
+    }
+  });
+
+  const days = {};
+  clients.forEach(c => { const d = (c.created_at || '').substring(0, 10); if (d) days[d] = (days[d] || 0) + 1; });
+  const dayLabels = Object.keys(days).sort();
+  let cum = 0;
+  const cumData = dayLabels.map(d => { cum += days[d]; return cum; });
+  if (!dayLabels.length) { dayLabels.push('Now'); cumData.push(0); }
+
+  if (clientChart) clientChart.destroy();
+  clientChart = new Chart(document.getElementById('clientChart').getContext('2d'), {
+    type: 'line',
+    data: { labels: dayLabels, datasets: [{ data: cumData, borderColor: '#d4af37', backgroundColor: 'rgba(212,175,55,0.08)', borderWidth: 2, pointRadius: 3, pointBackgroundColor: '#d4af37', fill: true, tension: 0.4 }] },
+    options: {
+      responsive: true, animation: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => c.parsed.y + ' clients' } } },
+      scales: { x: { ticks: { font: { size: 9 }, maxTicksLimit: 6 }, grid: { color: '#1e2440' } }, y: { ticks: { font: { size: 9 }, stepSize: 1 }, grid: { color: '#1e2440' } } }
+    }
+  });
+}
+
+// ── NEW: parse M-Pesa note field into { kes, ref } ───────────────────────────
+// note format: "KES sent: 13500 | M-Pesa ref: QJK3XAB12C"
+function parseMpesaNote(note) {
+  const out = { kes: null, ref: null };
+  if (!note) return out;
+  const parts = note.split('|').map(p => p.trim());
+  parts.forEach(p => {
+    if (p.toLowerCase().startsWith('kes sent:'))   out.kes = p.split(':')[1].trim();
+    if (p.toLowerCase().startsWith('m-pesa ref:')) out.ref = p.split(':')[1].trim();
+  });
+  return out;
+}
+
+// ── PENDING DEPOSITS ──────────────────────────────────────────────────────────
+function renderPending(txData) {
+  const pending = txData.filter(t => t.type === 'DEPOSIT' && t.status === 'PENDING');
+  if (!pending.length) {
+    setHTML('pendingList', '<div class="empty">&#9989; No pending deposits. All clear!</div>');
+    return;
+  }
+
+  let html = `<table class="tbl"><thead><tr>
+    <th>Date</th><th>Client</th><th>Amount</th><th>Method</th>
+    <th>Address / Number</th><th>M-Pesa Details</th><th>Reference</th><th>Actions</th>
+  </tr></thead><tbody>`;
+
+  pending.forEach(t => {
+    storeTx(t);
+    const isMpesa   = t.method === 'MPESA';
+    const addr      = t.deposit_address || '—';
+    const addrShort = addr.length > 20 ? addr.substring(0, 20) + '...' : addr;
+
+    // Method badge
+    const methodBadge = isMpesa
+      ? `<span class="badge badge-mpesa">M-Pesa</span>`
+      : `<span class="badge badge-pending">${escHtml(t.method || '—')}</span>`;
+
+    // M-Pesa details cell — KES amount + transaction code from note
+    let mpesaCell = '<span style="color:#333;">—</span>';
+    if (isMpesa && t.note) {
+      const mp = parseMpesaNote(t.note);
+      const kesLine = mp.kes ? `<div style="color:#00a550;font-size:10px;font-weight:bold;">KES ${escHtml(mp.kes)}</div>` : '';
+      const refLine = mp.ref ? `<div style="font-family:monospace;font-size:10px;color:#00e090;">${escHtml(mp.ref)}</div>` : '';
+      mpesaCell = (kesLine || refLine)
+        ? `<div class="mpesa-note">${kesLine}${refLine}</div>`
+        : `<span style="color:#ffc800;font-size:10px;">Submitted — no code</span>`;
+    }
+
+    html += `<tr>
+      <td style="color:#aaa;">${(t.created_at || '').substring(0, 16).replace('T', ' ')}</td>
+      <td>
+        <div style="font-weight:bold;">${escHtml(t.user_name || '—')}</div>
+        <div style="font-size:10px;color:#555;">${escHtml(t.user_email || '')}</div>
+      </td>
+      <td style="color:#00e090;font-weight:bold;">$${fmt(t.amount_usd)}</td>
+      <td>${methodBadge}</td>
+      <td style="font-family:monospace;font-size:10px;color:#aaa;" title="${escAttr(addr)}">${escHtml(addrShort)}</td>
+      <td>${mpesaCell}</td>
+      <td style="font-size:11px;color:#555;">${escHtml(t.reference || '—')}</td>
+      <td><div style="display:flex;gap:6px;">
+        <button class="btn-sm btn-green" onclick="openApproveModal('${t.id}')">&#9989; Approve</button>
+        <button class="btn-sm btn-danger" onclick="openRejectModal('${t.id}')">&#10060; Reject</button>
+      </div></td>
+    </tr>`;
+  });
+
+  html += '</tbody></table>';
+  setHTML('pendingList', html);
+}
+
+// ── PENDING WITHDRAWALS ───────────────────────────────────────────────────────
+function renderPendingWithdrawals(txData) {
+  const pending = txData.filter(t =>
+    (t.type === 'WITHDRAWAL' || t.type === 'REFERRAL_WITHDRAWAL') && t.status === 'PENDING'
+  );
+  if (!pending.length) {
+    setHTML('pendingWdrList', '<div class="empty">&#9989; No pending withdrawals. All clear!</div>');
+    return;
+  }
+  let html = `<table class="tbl"><thead><tr>
+    <th>Date</th><th>Client</th><th>Type</th><th>Amount to Send</th>
+    <th>Network</th><th>Send USDT To</th><th>Reference</th><th>Actions</th>
+  </tr></thead><tbody>`;
+  pending.forEach(t => {
+    storeTx(t);
+    const addr      = t.deposit_address || '—';
+    const addrShort = addr.length > 24 ? addr.substring(0, 24) + '...' : addr;
+    const isRef     = t.type === 'REFERRAL_WITHDRAWAL';
+    const typeCell  = isRef
+      ? `<span style="background:rgba(167,139,250,0.15);border:1px solid #a78bfa;color:#a78bfa;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:bold;">&#127381; REFERRAL</span>`
+      : `<span style="background:rgba(255,69,96,0.15);border:1px solid #ff4560;color:#ff4560;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:bold;">&#128181; ACCOUNT</span>`;
+    const amtColor  = isRef ? '#a78bfa' : '#ff4560';
+    const addrCell  = addr !== '—'
+      ? `<span style="font-family:monospace;font-size:10px;color:#d4af37;" title="${escAttr(addr)}">${escHtml(addrShort)}</span>
+         <button onclick="copyAddr('${escAttr(addr)}')" style="margin-left:6px;padding:2px 7px;background:#333;border:1px solid #555;color:#aaa;border-radius:3px;cursor:pointer;font-size:10px;">&#128203;</button>`
+      : '<span style="color:#ff4560;font-size:11px;">No address!</span>';
+    html += `<tr>
+      <td style="color:#aaa;font-size:11px;">${(t.created_at || '').substring(0, 16).replace('T', ' ')}</td>
+      <td><div style="font-weight:bold;">${escHtml(t.user_name || '—')}</div><div style="font-size:10px;color:#555;">${escHtml(t.user_email || '')}</div></td>
+      <td>${typeCell}</td>
+      <td style="color:${amtColor};font-weight:bold;font-size:15px;">$${fmt(t.amount_usd)}</td>
+      <td><span style="background:rgba(212,175,55,0.1);border:1px solid #d4af37;color:#d4af37;border-radius:4px;padding:2px 8px;font-size:11px;">${escHtml(t.method || '—')}</span></td>
+      <td>${addrCell}</td>
+      <td style="font-size:11px;color:#555;">${escHtml(t.reference || '—')}</td>
+      <td><div style="display:flex;gap:6px;">
+        <button class="btn-sm btn-green" onclick="openApproveWdrModal('${t.id}')">&#9989; Approve</button>
+        <button class="btn-sm btn-danger" onclick="openRejectWdrModal('${t.id}')">&#10060; Reject</button>
+      </div></td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  setHTML('pendingWdrList', html);
+}
+
+function copyAddr(addr) {
+  navigator.clipboard.writeText(addr).then(() => showSuccess('Address copied to clipboard!'));
+}
+
+// ── CLIENTS ───────────────────────────────────────────────────────────────────
+function renderClients(clients) {
+  const el = document.getElementById('clientList');
+  if (!clients || !clients.length) {
+    setHTML(el, '<div class="empty">No clients registered yet.</div>');
+    document.getElementById('clientTotals').style.display = 'none';
+    return;
+  }
+  let html = `<table class="tbl"><thead><tr>
+    <th>#</th><th>Name</th><th>Email</th><th>Phone</th>
+    <th>Balance</th><th>Equity</th>
+    <th>Total Deposits</th><th>Total Withdrawals</th>
+    <th>Trade Profits</th><th>Ref Earned</th><th>Ref Balance</th>
+    <th>Referrals</th><th>Days Active</th><th>Total Generated</th>
+    <th>Ref Code</th><th>Joined</th><th>Trade</th><th>Edit</th>
+  </tr></thead><tbody>`;
+
+  let sumBalance = 0, sumEquity = 0, sumDeposits = 0, sumWithdrawals = 0,
+      sumProfits = 0, sumRefEarned = 0, sumGenerated = 0;
+
+  clients.forEach((c, i) => {
+    storeClient(c);
+    const dep    = parseFloat(c.total_deposits    || 0);
+    const wdr    = parseFloat(c.total_withdrawals || 0);
+    const profit = parseFloat(c.total_profit      || 0);
+    const refE   = parseFloat(c.total_ref_earned  || 0);
+    const bal    = parseFloat(c.balance           || 0);
+    const eq     = parseFloat(c.equity            || 0);
+    const refBal = parseFloat(c.ref_balance       || 0);
+    const gen    = dep + profit + refE;
+
+    sumBalance += bal; sumEquity += eq; sumDeposits += dep;
+    sumWithdrawals += wdr; sumProfits += profit;
+    sumRefEarned += refE; sumGenerated += gen;
+
+    html += `<tr>
+      <td style="color:#555;">${i + 1}</td>
+      <td style="font-weight:bold;">${escHtml(c.name || '—')}</td>
+      <td style="color:#aaa;font-size:11px;">${escHtml(c.email || '—')}</td>
+      <td style="color:#aaa;font-size:11px;">${escHtml(c.phone || '—')}</td>
+      <td style="color:#00e090;font-weight:bold;">${fmtD(bal)}</td>
+      <td style="color:#d4af37;font-weight:bold;">${fmtD(eq)}</td>
+      <td style="color:#00e090;">${fmtD(dep)}</td>
+      <td style="color:#ff4560;">${fmtD(wdr)}</td>
+      <td style="color:#d4af37;">${fmtD(profit)}</td>
+      <td style="color:#a78bfa;">${fmtD(refE)}</td>
+      <td style="color:#a78bfa;">${fmtD(refBal)}</td>
+      <td style="text-align:center;">${c.ref_count || 0}</td>
+      <td style="text-align:center;color:#aaa;">${c.days_active || 0}</td>
+      <td style="color:#ffc800;font-weight:bold;">${fmtD(gen)}</td>
+      <td style="font-family:monospace;font-size:11px;color:#aaa;">${escHtml(c.referral_code || '—')}</td>
+      <td style="color:#555;font-size:11px;">${(c.created_at || '').substring(0, 10)}</td>
+      <td>
+        <button class="btn-sm"
+          style="background:rgba(0,224,144,0.1);border:1px solid #00e090;color:#00e090;"
+          onclick="openRunTradeModal('${c.id}')" id="tradeBtn-${c.id}">
+          &#128200; Run Trade
+        </button>
+      </td>
+      <td>
+        <button class="btn-sm"
+          style="background:rgba(212,175,55,0.1);border:1px solid #d4af37;color:#d4af37;"
+          onclick="openEditClientModal('${c.id}')">
+          &#9998; Edit
+        </button>
+      </td>
+    </tr>`;
+  });
+
+  html += '</tbody></table>';
+  setHTML(el, html);
+
+  document.getElementById('ctBalance').textContent     = fmtD(sumBalance);
+  document.getElementById('ctEquity').textContent      = fmtD(sumEquity);
+  document.getElementById('ctDeposits').textContent    = fmtD(sumDeposits);
+  document.getElementById('ctWithdrawals').textContent = fmtD(sumWithdrawals);
+  document.getElementById('ctProfits').textContent     = fmtD(sumProfits);
+  document.getElementById('ctRefEarned').textContent   = fmtD(sumRefEarned);
+  document.getElementById('ctGenerated').textContent   = fmtD(sumGenerated);
+  document.getElementById('clientTotals').style.display = 'flex';
+}
+
+function filterClients() {
+  const q = document.getElementById('clientSearch').value.toLowerCase();
+  renderClients(allClients.filter(c =>
+    (c.name || '').toLowerCase().includes(q) || (c.email || '').toLowerCase().includes(q)
+  ));
+}
+
+// ── TRANSACTIONS ──────────────────────────────────────────────────────────────
+function renderTx(txs) {
+  if (!txs || !txs.length) { setHTML('txList', '<div class="empty">No transactions found.</div>'); return; }
+  let html = `<table class="tbl"><thead><tr>
+    <th>Date</th><th>Client</th><th>Type</th><th>Amount</th>
+    <th>Method</th><th>Status</th><th>Reference</th><th>Note</th><th>Actions</th>
+  </tr></thead><tbody>`;
+  txs.forEach(t => {
+    storeTx(t);
+    const tc = t.type === 'DEPOSIT' ? 'type-deposit'
+             : t.type === 'WITHDRAWAL' ? 'type-withdrawal'
+             : t.type === 'REFERRAL_WITHDRAWAL' ? 'type-referral'
+             : 'type-adjustment';
+    const bc = t.status === 'COMPLETED' ? 'badge-completed'
+             : t.status === 'PENDING'   ? 'badge-pending'
+             : 'badge-rejected';
+    const isWdr      = (t.type === 'WITHDRAWAL' || t.type === 'REFERRAL_WITHDRAWAL');
+    const showApprove = isWdr && t.status === 'PENDING';
+    const isMpesa    = t.method === 'MPESA';
+
+    // Note cell — show M-Pesa details or plain note
+    let noteCell = '<span style="color:#333;">—</span>';
+    if (isMpesa && t.note) {
+      const mp = parseMpesaNote(t.note);
+      const parts = [];
+      if (mp.kes) parts.push(`KES ${escHtml(mp.kes)}`);
+      if (mp.ref) parts.push(escHtml(mp.ref));
+      if (parts.length) noteCell = `<span class="mpesa-note">${parts.join('<br>')}</span>`;
+    } else if (t.note) {
+      noteCell = `<span style="color:#aaa;font-size:11px;">${escHtml(t.note)}</span>`;
+    }
+
+    const methodLabel = isMpesa
+      ? `<span style="color:#00a550;font-weight:bold;">M-Pesa</span>`
+      : escHtml(t.method || '—');
+
+    html += `<tr>
+      <td style="color:#aaa;font-size:11px;">${(t.created_at || '').substring(0, 16).replace('T', ' ')}</td>
+      <td style="font-weight:bold;">${escHtml(t.user_name || '—')}</td>
+      <td class="${tc}">${(t.type || '').replace(/_/g, ' ')}</td>
+      <td style="font-weight:bold;">$${fmt(t.amount_usd)}</td>
+      <td>${methodLabel}</td>
+      <td><span class="badge ${bc}">${t.status}</span></td>
+      <td style="color:#555;font-size:11px;">${escHtml(t.reference || '—')}</td>
+      <td>${noteCell}</td>
+      <td>${showApprove
+        ? `<button class="btn-sm btn-green" onclick="openApproveWdrModal('${t.id}')">&#9989; Approve</button>`
+        : '<span style="color:#333;">—</span>'}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  setHTML('txList', html);
+}
+
+function filterTx() {
+  const q      = document.getElementById('txSearch').value.toLowerCase();
+  const type   = document.getElementById('txTypeFilter').value;
+  const status = document.getElementById('txStatusFilter').value;
+  renderTx(allTx.filter(t =>
+    (!q || (t.user_name || '').toLowerCase().includes(q) || (t.reference || '').toLowerCase().includes(q)) &&
+    (!type || t.type === type) &&
+    (!status || t.status === status)
+  ));
+}
+
+// ── REFERRALS ─────────────────────────────────────────────────────────────────
+async function loadReferrals() {
+  setHTML('referralList', '<div class="loading">Loading...</div>');
+  const d = await api('/api/admin/referrals');
+  if (!d.success) { showError('Failed to load referrals'); return; }
+  if (!d.data.length) { setHTML('referralList', '<div class="empty">No referrals yet.</div>'); return; }
+  let html = '<table class="tbl"><thead><tr><th>Date</th><th>Referrer</th><th>Referred User</th><th>Commission</th><th>Status</th></tr></thead><tbody>';
+  d.data.forEach(r => {
+    html += `<tr>
+      <td style="color:#aaa;font-size:11px;">${(r.created_at || '').substring(0, 10)}</td>
+      <td><div style="font-weight:bold;">${escHtml(r.referrer_name || '—')}</div><div style="font-size:10px;color:#555;">${escHtml(r.referrer_email || '')}</div></td>
+      <td><div style="font-weight:bold;">${escHtml(r.referred_name || '—')}</div><div style="font-size:10px;color:#555;">${escHtml(r.referred_email || '')}</div></td>
+      <td style="color:#00e090;font-weight:bold;">$${fmt(r.commission_usd)}</td>
+      <td><span class="badge badge-credited">${r.status}</span></td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  setHTML('referralList', html);
+}
+
+// ── TRADES ────────────────────────────────────────────────────────────────────
+async function loadTrades() {
+  setHTML('tradeList', '<div class="loading">Loading...</div>');
+  const status = document.getElementById('tradeStatusFilter').value;
+  const d = await api('/api/admin/trades' + (status ? '?status=' + status : ''));
+  if (!d.success) { showError('Failed to load trades'); return; }
+  if (!d.data.length) { setHTML('tradeList', '<div class="empty">No trades found.</div>'); return; }
+  let html = '<table class="tbl"><thead><tr><th>Opened</th><th>Client</th><th>Symbol</th><th>Direction</th><th>Entry</th><th>Close</th><th>PnL</th><th>Status</th><th>Reason</th></tr></thead><tbody>';
+  d.data.forEach(t => {
+    const pnlColor = (t.pnl || 0) >= 0 ? '#00e090' : '#ff4560';
+    const dirColor = t.direction === 'BUY' ? '#00e090' : '#ff4560';
+    html += `<tr>
+      <td style="color:#aaa;font-size:11px;">${(t.opened_at || '').substring(0, 16).replace('T', ' ')}</td>
+      <td style="font-weight:bold;">${escHtml(t.user_name || '—')}</td>
+      <td style="color:#d4af37;font-weight:bold;">${escHtml(t.symbol || '—')}</td>
+      <td style="color:${dirColor};font-weight:bold;">${escHtml(t.direction || '—')}</td>
+      <td>$${fmt(t.entry_price)}</td>
+      <td>${t.close_price ? '$' + fmt(t.close_price) : '<span style="color:#555">Open</span>'}</td>
+      <td style="color:${pnlColor};font-weight:bold;">${t.pnl != null ? (t.pnl >= 0 ? '+' : '') + fmt(t.pnl) : '—'}</td>
+      <td><span class="badge ${t.status === 'OPEN' ? 'badge-open' : 'badge-closed'}">${t.status}</span></td>
+      <td style="color:#555;font-size:11px;">${escHtml(t.close_reason || '—')}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  setHTML('tradeList', html);
+}
+
+// ── ADJUST ────────────────────────────────────────────────────────────────────
+// Which client fields can be adjusted, and their display labels.
+const adjustFieldLabels = {
+  balance:            'Balance',
+  equity:              'Equity',
+  total_deposits:      'Total Deposits',
+  total_withdrawals:   'Total Withdrawals',
+  total_profit:        'Trade Profit',
+  total_ref_earned:    'Referral Earnings',
+  ref_balance:         'Referral Balance'
+};
+
+function populateAdjustClients() {
+  const sel = document.getElementById('adjustClient');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">— Select client —</option>';
+  allClients.forEach(c => {
+    const opt = document.createElement('option');
+    opt.value = c.id;
+    opt.textContent = `${c.name} (${c.email}) — $${fmt(c.balance)}`;
+    if (c.id === cur) opt.selected = true;
+    sel.appendChild(opt);
+  });
+  updateAdjustCurrentValue();
+}
+
+// Shows the client's current value for whichever field is selected, so the
+// admin can see what they're adjusting before entering an amount.
+function updateAdjustCurrentValue() {
+  const uid   = document.getElementById('adjustClient').value;
+  const field = document.getElementById('adjustField').value;
+  const el    = document.getElementById('adjustCurrentVal');
+  const c     = _clientMap[uid];
+  if (!c) { el.textContent = 'Current value: —'; return; }
+  const val = parseFloat(c[field] || 0);
+  el.textContent = `Current ${adjustFieldLabels[field]}: ${fmtD(val)}`;
+}
+
+async function submitAdjust() {
+  const uid    = document.getElementById('adjustClient').value;
+  const field  = document.getElementById('adjustField').value;
+  const amount = parseFloat(document.getElementById('adjustAmount').value || 0);
+  const note   = document.getElementById('adjustNote').value.trim();
+  if (!uid)    { showError('Select a client', 'adjustError'); return; }
+  if (!amount) { showError('Enter an amount', 'adjustError'); return; }
+  if (!note)   { showError('Enter a reason',  'adjustError'); return; }
+
+  // NOTE: this now sends a `field` key alongside amount/note so the backend
+  // knows which client column to adjust. See the message accompanying this
+  // file for what the /api/admin/client/<uid>/adjust route needs to do
+  // with it — it previously only ever touched `balance`.
+  const d = await post(`/api/admin/client/${uid}/adjust`, { amount, note, field });
+  if (!d.success) { showError(d.error, 'adjustError'); return; }
+  showSuccess(d.data.message, 'adjustSuccess');
+  document.getElementById('adjustAmount').value = '';
+  document.getElementById('adjustNote').value   = '';
+  await refreshData();
+  updateAdjustCurrentValue();
+}
+
+// ── EDIT CLIENT ───────────────────────────────────────────────────────────────
+function openEditClientModal(uid) {
+  const c = _clientMap[uid];
+  if (!c) return;
+  document.getElementById('editClientId').value    = uid;
+  document.getElementById('editClientName').value  = c.name  || '';
+  document.getElementById('editClientEmail').value = c.email || '';
+  document.getElementById('editClientPhone').value = c.phone || '';
+  document.getElementById('editClientErr').classList.remove('show');
+  document.getElementById('editClientOk').classList.remove('show');
+
+  // Reset the password sub-section state every time the modal opens,
+  // so a stale value/message from a previously-edited client never lingers.
+  document.getElementById('resetPwNew').value = '';
+  document.getElementById('resetPwNotify').checked = true;
+  document.getElementById('resetPwErr').classList.remove('show');
+  document.getElementById('resetPwOk').classList.remove('show');
+
+  document.getElementById('editClientModal').classList.add('show');
+}
+
+async function saveClientEdit() {
+  const uid   = document.getElementById('editClientId').value;
+  const name  = document.getElementById('editClientName').value.trim();
+  const email = document.getElementById('editClientEmail').value.trim();
+  const phone = document.getElementById('editClientPhone').value.trim();
+
+  if (!name)  { showError('Name is required',  'editClientErr'); return; }
+  if (!email) { showError('Email is required', 'editClientErr'); return; }
+
+  const d = await post(`/api/admin/client/${uid}/edit`, { name, email, phone });
+
+  if (!d.success) {
+    showError(d.error || 'Update failed', 'editClientErr');
+    return;
+  }
+
+  const okEl = document.getElementById('editClientOk');
+  okEl.textContent = '✓ ' + d.data.message;
+  okEl.classList.add('show');
+
+  setTimeout(async () => {
+    closeModal('editClientModal');
+    await refreshData();
+  }, 1500);
+}
+
+// ── RESET CLIENT PASSWORD ────────────────────────────────────────────────────
+async function resetClientPassword() {
+  const uid    = document.getElementById('editClientId').value;
+  const newPw  = document.getElementById('resetPwNew').value;
+  const notify = document.getElementById('resetPwNotify').checked;
+  const btn    = document.getElementById('resetPwBtn');
+
+  document.getElementById('resetPwErr').classList.remove('show');
+  document.getElementById('resetPwOk').classList.remove('show');
+
+  if (!uid) {
+    showError('No client selected', 'resetPwErr');
+    return;
+  }
+  if (!newPw || newPw.length < 6) {
+    showError('Password must be at least 6 characters', 'resetPwErr');
+    return;
+  }
+
+  btn.disabled = true;
+  const originalLabel = btn.innerHTML;
+  btn.innerHTML = 'Resetting...';
+
+  try {
+    const d = await post(`/api/admin/client/${uid}/reset-password`, {
+      new_password: newPw,
+      notify: notify
+    });
+
+    if (!d.success) {
+      showError(d.error || 'Reset failed', 'resetPwErr');
+      return;
+    }
+
+    showSuccess(d.data.message, 'resetPwOk');
+    document.getElementById('resetPwNew').value = '';
+  } catch (e) {
+    showError('Network error — please try again', 'resetPwErr');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = originalLabel;
+  }
+}
+
+// ── RUN MISSED TRADE (single-client backfill, scheduler untouched) ──────────
+function openRunTradeModal(uid) {
+  const c = _clientMap[uid];
+  if (!c) return;
+  document.getElementById('runTradeUid').value = uid;
+  document.getElementById('runTradeClientName').textContent = c.name || '—';
+  const netDep = parseFloat(c.total_deposits || 0) - parseFloat(c.total_withdrawals || 0);
+  document.getElementById('runTradeNetDeposit').textContent = fmtD(netDep);
+  document.getElementById('runTradeErr').classList.remove('show');
+  document.getElementById('runTradeModal').classList.add('show');
+}
+
+async function confirmRunTrade() {
+  const uid = document.getElementById('runTradeUid').value;
+  const btn = document.getElementById('runTradeConfirmBtn');
+  const originalLabel = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = 'Running...';
+
+  try {
+    const d = await post('/api/admin/trade/run-single', { user_id: uid });
+    if (!d.success) {
+      showError(d.error, 'runTradeErr');
+      return;
+    }
+    closeModal('runTradeModal');
+    showSuccess(d.data.message);
+    await refreshData();
+  } catch (e) {
+    showError('Network error — please try again', 'runTradeErr');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = originalLabel;
+  }
+}
+
+// ── RECALCULATE CLIENT PROFITS (NEW — global flat-profit migration) ─────────
+// Opens the modal, immediately runs a dry run (POST with no body) against
+// /api/admin/migrate/flat-profit, and renders a per-client preview table of
+// what WOULD change. The "Apply" button only becomes active once the dry
+// run has loaded and at least one client actually needs a correction; it
+// then re-calls the same endpoint with {apply:true} to commit it for real.
+let _migrateDryRunLoaded = false;
+
+function openMigrateModal() {
+  _migrateDryRunLoaded = false;
+  document.getElementById('migrateErr').classList.remove('show');
+  document.getElementById('migrateOk').classList.remove('show');
+  document.getElementById('migrateApplyBtn').disabled = true;
+  document.getElementById('migrateSummary').textContent = '';
+  setHTML('migrateResults', '<div class="loading">Running dry run...</div>');
+  document.getElementById('migrateModal').classList.add('show');
+  runMigrateDryRun();
+}
+
+async function runMigrateDryRun() {
+  try {
+    const d = await post('/api/admin/migrate/flat-profit', {});
+    if (!d.success) {
+      showError(d.error || 'Dry run failed', 'migrateErr');
+      setHTML('migrateResults', '<div class="empty">Failed to load.</div>');
+      return;
+    }
+    _migrateDryRunLoaded = true;
+    renderMigrateResults(d.data);
+  } catch (e) {
+    showError('Network error — please try again', 'migrateErr');
+    setHTML('migrateResults', '<div class="empty">Failed to load.</div>');
+  }
+}
+
+function renderMigrateResults(data) {
+  const needsCorrection = data.results.filter(r => Math.abs(r.delta) >= 0.01);
+
+  const deltaColor = data.total_delta < 0 ? '#ff4560' : '#00e090';
+  document.getElementById('migrateSummary').innerHTML =
+    `<strong style="color:#ffc800;">${needsCorrection.length}</strong> of ${data.results.length} client(s) need correction` +
+    (needsCorrection.length
+      ? ` — net balance change: <strong style="color:${deltaColor};">${data.total_delta >= 0 ? '+' : ''}$${fmt(data.total_delta)}</strong>`
+      : '');
+
+  document.getElementById('migrateApplyBtn').disabled = needsCorrection.length === 0;
+
+  if (!needsCorrection.length) {
+    setHTML('migrateResults', '<div class="empty">&#9989; Everyone already matches the current formula — nothing to correct.</div>');
+    return;
+  }
+
+  let html = `<div style="max-height:320px;overflow-y:auto;">
+    <table class="tbl"><thead><tr>
+      <th>Client</th><th>Days</th><th>Old Profit</th><th>Correct Profit</th><th>Balance Change</th>
+    </tr></thead><tbody>`;
+  needsCorrection.forEach(r => {
+    const rowDeltaColor = r.delta < 0 ? '#ff4560' : '#00e090';
+    html += `<tr>
+      <td style="font-weight:bold;">${escHtml(r.name)}</td>
+      <td style="text-align:center;color:#aaa;">${r.days_traded}</td>
+      <td style="color:#aaa;">$${fmt(r.old_total_profit)}</td>
+      <td style="color:#d4af37;">$${fmt(r.correct_total_profit)}</td>
+      <td style="color:${rowDeltaColor};font-weight:bold;">${r.delta >= 0 ? '+' : ''}$${fmt(r.delta)}</td>
+    </tr>`;
+  });
+  html += '</tbody></table></div>';
+  setHTML('migrateResults', html);
+}
+
+async function confirmMigrate() {
+  if (!_migrateDryRunLoaded) return;
+
+  if (!confirm('This will correct balances for ALL clients shown above and cannot be undone automatically. Continue?')) {
+    return;
+  }
+
+  const btn = document.getElementById('migrateApplyBtn');
+  const originalLabel = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = 'Applying...';
+
+  try {
+    const d = await post('/api/admin/migrate/flat-profit', { apply: true });
+    if (!d.success) {
+      showError(d.error || 'Correction failed', 'migrateErr');
+      btn.disabled = false;
+      btn.innerHTML = originalLabel;
+      return;
+    }
+    showSuccess(
+      `Correction applied — ${d.data.clients_needing_correction} client(s) updated, net change $${fmt(d.data.total_delta)}`,
+      'migrateOk'
+    );
+    setHTML('migrateResults', '<div class="empty">&#9989; Correction applied. Client balances and trade logs updated.</div>');
+    document.getElementById('migrateSummary').textContent = '';
+    await refreshData();
+  } catch (e) {
+    showError('Network error — please try again', 'migrateErr');
+    btn.disabled = false;
+    btn.innerHTML = originalLabel;
+  }
+}
+
+// ── MODALS ────────────────────────────────────────────────────────────────────
+function escHtml(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function escAttr(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// Deposit approve modal — shows M-Pesa verification panel when relevant
+function openApproveModal(txId) {
+  const t = _txMap[txId];
+  if (!t) return;
+
+  document.getElementById('modalTxId').value             = txId;
+  document.getElementById('modalClientName').textContent = t.user_name  || '—';
+  document.getElementById('modalAmount').textContent     = '$' + fmt(t.amount_usd);
+  document.getElementById('modalRef').textContent        = t.reference  || '—';
+
+  const isMpesa = t.method === 'MPESA';
+
+  // Method / address display
+  if (isMpesa) {
+    document.getElementById('modalNetwork').innerHTML =
+      `<span class="badge badge-mpesa">M-Pesa</span>`;
+    document.getElementById('modalAddress').textContent = t.deposit_address || '—';
+  } else {
+    document.getElementById('modalNetwork').textContent = t.method || '—';
+    document.getElementById('modalAddress').textContent = t.deposit_address || '—';
+  }
+
+  // Show / hide M-Pesa verification panel
+  const panel = document.getElementById('mpesaVerifyPanel');
+  if (isMpesa && t.note) {
+    const mp = parseMpesaNote(t.note);
+    document.getElementById('mpesaVerifyKes').textContent = mp.kes ? 'KES ' + mp.kes : 'Not provided';
+    document.getElementById('mpesaVerifyRef').textContent = mp.ref || 'Not provided';
+    panel.classList.add('show');
+  } else {
+    panel.classList.remove('show');
+  }
+
+  document.getElementById('approveModal').classList.add('show');
+}
+
+function openRejectModal(txId) {
+  const t = _txMap[txId];
+  if (!t) return;
+  document.getElementById('rejectTxId').value   = txId;
+  document.getElementById('rejectReason').value = '';
+  document.getElementById('rejectModal').classList.add('show');
+}
+
+function openApproveWdrModal(txId) {
+  const t = _txMap[txId];
+  if (!t) return;
+  if (t.type === 'DEPOSIT') { showError('This is a deposit, not a withdrawal.'); return; }
+
+  const isRef = t.type === 'REFERRAL_WITHDRAWAL';
+  document.getElementById('wdrModalTxId').value             = txId;
+  document.getElementById('wdrModalClientName').textContent = t.user_name || '—';
+  document.getElementById('wdrModalAmount').textContent     = '$' + fmt(t.amount_usd);
+  document.getElementById('wdrModalNetwork').textContent    = t.method    || '—';
+  document.getElementById('wdrModalAddress').textContent    = t.deposit_address || '—';
+  document.getElementById('wdrModalRef').textContent        = t.reference || '—';
+  document.getElementById('wdrModalTypeBadge').innerHTML    = isRef
+    ? `<span style="background:rgba(167,139,250,0.15);border:1px solid #a78bfa;color:#a78bfa;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:bold;">&#127381; REFERRAL — 16% commission</span>`
+    : `<span style="background:rgba(255,69,96,0.15);border:1px solid #ff4560;color:#ff4560;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:bold;">&#128181; ACCOUNT withdrawal</span>`;
+  document.getElementById('approveWdrModal').classList.add('show');
+}
+
+function openRejectWdrModal(txId) {
+  const t = _txMap[txId];
+  if (!t) return;
+  if (t.type === 'DEPOSIT') { showError('This is a deposit, not a withdrawal.'); return; }
+  document.getElementById('rejectWdrTxId').value   = txId;
+  document.getElementById('rejectWdrReason').value = '';
+  document.getElementById('rejectWdrModal').classList.add('show');
+}
+
+function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+
+document.querySelectorAll('.modal-overlay').forEach(o => {
+  o.addEventListener('click', e => { if (e.target === o) o.classList.remove('show'); });
+});
+
+async function confirmApprove() {
+  const txId = document.getElementById('modalTxId').value;
+  const t    = _txMap[txId];
+  if (!t || t.type !== 'DEPOSIT') {
+    closeModal('approveModal');
+    showError('Type mismatch — please refresh and try again.');
+    return;
+  }
+  const d = await post('/api/admin/deposit/approve', { tx_id: txId });
+  closeModal('approveModal');
+  if (!d.success) { showError(d.error); return; }
+  showSuccess(d.data.message);
+  await refreshData();
+}
+
+async function confirmReject() {
+  const txId   = document.getElementById('rejectTxId').value;
+  const reason = document.getElementById('rejectReason').value.trim() || 'Rejected by admin';
+  const d = await post('/api/admin/deposit/reject', { tx_id: txId, reason });
+  closeModal('rejectModal');
+  if (!d.success) { showError(d.error); return; }
+  showSuccess('Deposit rejected.');
+  await refreshData();
+}
+
+async function confirmWdrApprove() {
+  const txId = document.getElementById('wdrModalTxId').value;
+  const t    = _txMap[txId];
+  if (!t || t.type === 'DEPOSIT') {
+    closeModal('approveWdrModal');
+    showError('Type mismatch — please refresh and try again.');
+    return;
+  }
+  const d = await post('/api/admin/withdrawal/approve', { tx_id: txId });
+  closeModal('approveWdrModal');
+  if (!d.success) { showError(d.error); return; }
+  showSuccess('Withdrawal approved and marked complete.');
+  await refreshData();
+}
+
+async function confirmWdrReject() {
+  const txId   = document.getElementById('rejectWdrTxId').value;
+  const reason = document.getElementById('rejectWdrReason').value.trim() || 'Rejected by admin';
+  const d = await post('/api/admin/withdrawal/reject', { tx_id: txId, reason });
+  closeModal('rejectWdrModal');
+  if (!d.success) { showError(d.error); return; }
+  showSuccess('Withdrawal rejected.');
+  await refreshData();
+}
+
+// ── REFRESH ───────────────────────────────────────────────────────────────────
+async function refreshData() {
+  await loadStats();
+  const [txRes, clientRes] = await Promise.all([
+    api('/api/admin/transactions'),
+    api('/api/admin/clients'),
+  ]);
+  if (txRes.success)     { allTx = txRes.data; allTx.forEach(storeTx); }
+  if (clientRes.success) { allClients = clientRes.data; allClients.forEach(storeClient); }
+
+  if (activeTab === 'pending')      renderPending(allTx);
+  if (activeTab === 'pendingWdr')   renderPendingWithdrawals(allTx);
+  if (activeTab === 'clients')      renderClients(allClients);
+  if (activeTab === 'transactions') renderTx(allTx);
+}
+
+// ── INIT ──────────────────────────────────────────────────────────────────────
+async function init() {
+  await loadStats();
+  const [txRes, clientRes] = await Promise.all([
+    api('/api/admin/transactions'),
+    api('/api/admin/clients'),
+  ]);
+  if (txRes.success)     { allTx = txRes.data; allTx.forEach(storeTx); }
+  if (clientRes.success) { allClients = clientRes.data; allClients.forEach(storeClient); }
+
+  renderPending(allTx);
+  buildCharts(allTx, allClients);
+  populateAdjustClients();
+  loadWalletLinks();
+
+  setInterval(refreshData, 60000);
+}
+
+init();
+</script>
+</body>
+</html>y:flex; align-items:center; gap:15px; }
     .admin-badge { background:rgba(212,175,55,0.15); border:1px solid #d4af37; color:#d4af37; font-size:11px; padding:3px 10px; border-radius:20px; }
     .btn     { padding:8px 18px; border:none; border-radius:5px; cursor:pointer; font-size:13px; font-weight:bold; }
     .btn-red { background:#ff4560; color:#fff; }
@@ -1385,4 +2914,3 @@ init();
 </script>
 </body>
 </html>
-Done

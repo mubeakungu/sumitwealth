@@ -185,6 +185,14 @@ Summit Wealth v5.13 - $4.5 PROFIT PER $100 BALANCE (4.5% daily)
             admin_migrate_flat_profit() (for consistency, so the migration
             tool corrects historical balances under the same formula the
             live engine now uses).
+- NEW v5.25: Added POST /api/admin/client/<uid>/correct-profit — a
+            single-client-scoped counterpart to admin_migrate_flat_profit().
+            Recomputes ONLY the given client's daily_trade_log rows and
+            balance under the current live formula (v5.24). Dry run by
+            default; {"apply": true} to commit. This is what the admin
+            dashboard's per-client "Fix Profit" button calls — it never
+            reads or writes any other client's data, unlike the bulk
+            migration endpoint.
 """
 
 import os, hashlib, secrets, datetime, uuid, logging, threading, random, base64, math
@@ -1945,6 +1953,155 @@ def admin_trades():
     cur.close(); conn.close()
     return ok([dict(t) for t in trades])
 
+# ── ADMIN: FIX PROFIT — SINGLE CLIENT (v5.25 — NEW) ───────────────────────────
+@app.route("/api/admin/client/<uid>/correct-profit", methods=["POST"])
+@admin_required
+def admin_correct_client_profit(uid):
+    """
+    Single-client-scoped counterpart to admin_migrate_flat_profit() below.
+    Recomputes ONLY this client's daily_trade_log entries and account
+    balance under the CURRENT live profit formula (v5.24: for every day
+    they have a logged trade, profit = floor((deposits - completed
+    principal withdrawals) / PROFIT_BASIS_USD) * DAILY_PROFIT_PER_100).
+    No other client's data is read or written by this endpoint — that is
+    what distinguishes it from the bulk migration tool.
+
+    Dry run by default (returns what WOULD change, applied=false); pass
+    {"apply": true} to actually correct the balance and daily_trade_log
+    rows, and notify the client in-platform. This is what the admin
+    dashboard's per-client "Fix Profit" button calls.
+    """
+    d     = request.json or {}
+    apply = bool(d.get("apply", False))
+
+    conn = get_db()
+    cur  = conn.cursor()
+
+    cur.execute(
+        "SELECT u.id, u.name, u.email, a.id AS account_id, a.balance, a.equity "
+        "FROM users u JOIN accounts a ON u.id = a.user_id "
+        "WHERE u.id=%s AND u.role='client'", (uid,)
+    )
+    c = cur.fetchone()
+    if not c:
+        cur.close(); conn.close()
+        return err("Client not found", 404)
+
+    cur.execute(
+        "SELECT COALESCE(SUM(amount_usd),0) AS s FROM transactions "
+        "WHERE user_id=%s AND type='DEPOSIT' AND status='COMPLETED'", (uid,)
+    )
+    deposits = cur.fetchone()["s"]
+
+    cur.execute(
+        "SELECT COALESCE(SUM(amount_usd),0) AS s FROM transactions "
+        "WHERE user_id=%s AND type='WITHDRAWAL' AND status='COMPLETED'", (uid,)
+    )
+    principal_withdrawals = cur.fetchone()["s"]
+
+    # Profit basis is deposits minus completed principal withdrawals,
+    # floored at $0 (v5.24) — matches the live trade engine.
+    total_deposit = max(0.0, deposits - principal_withdrawals)
+
+    cur.execute(
+        "SELECT id, profit, date FROM daily_trade_log WHERE user_id=%s ORDER BY date", (uid,)
+    )
+    trade_log_rows    = cur.fetchall()
+    days_traded       = len(trade_log_rows)
+    old_total_profit  = round(sum(r["profit"] for r in trade_log_rows), 2)
+
+    if total_deposit < MIN_BALANCE or days_traded == 0:
+        flat_daily = 0.0
+    else:
+        # Only whole $100 units of (deposits - withdrawals) count — matches
+        # the live formula's floor() behavior.
+        flat_daily = round(math.floor(total_deposit / PROFIT_BASIS_USD) * DAILY_PROFIT_PER_100, 2)
+
+    correct_total_profit = round(flat_daily * days_traded, 2)
+    delta = round(correct_total_profit - old_total_profit, 2)
+
+    current_balance = c["balance"]
+    new_balance     = round(current_balance + delta, 2)
+
+    per_day = [
+        {"date": r["date"], "old_profit": r["profit"], "new_profit": flat_daily}
+        for r in trade_log_rows
+    ]
+
+    result = {
+        "user_id":               uid,
+        "name":                  c["name"],
+        "email":                 c["email"],
+        "total_deposit":         total_deposit,
+        "days_traded":           days_traded,
+        "flat_daily":            flat_daily,
+        "old_total_profit":      old_total_profit,
+        "correct_total_profit":  correct_total_profit,
+        "delta":                 delta,
+        "current_balance":       current_balance,
+        "new_balance":           new_balance,
+        "per_day":               per_day,
+        "applied":               False,
+    }
+
+    needs_correction = abs(delta) >= 0.01
+
+    if apply and needs_correction:
+        try:
+            cur.execute(
+                "UPDATE accounts SET balance = balance + %s, equity = equity + %s "
+                "WHERE user_id = %s",
+                (delta, delta, uid)
+            )
+            note = (
+                f"Balance correction: recomputed under current profit formula "
+                f"(${DAILY_PROFIT_PER_100:.1f} per ${PROFIT_BASIS_USD:.0f} of "
+                f"deposits minus withdrawals, whole $100 units only)."
+            )
+            cur.execute(
+                "INSERT INTO transactions(id,user_id,account_id,type,method,amount_usd,"
+                "reference,status,note,created_at,completed_at) "
+                "VALUES(%s,%s,%s,'ADJUSTMENT','CORRECTION',%s,%s,'COMPLETED',%s,%s,%s)",
+                (_uid(), uid, c["account_id"], delta,
+                 "FIX-" + secrets.token_hex(4).upper(), note, _now(), _now())
+            )
+            for row in trade_log_rows:
+                cur.execute(
+                    "UPDATE daily_trade_log SET profit=%s WHERE id=%s",
+                    (flat_daily, row["id"])
+                )
+
+            direction = "reduced" if delta < 0 else "increased"
+            notif_msg = (
+                f"We've corrected how your daily trading profit is calculated: it's "
+                f"now ${DAILY_PROFIT_PER_100:.1f} per ${PROFIT_BASIS_USD:.0f} of your "
+                f"deposits minus withdrawals (whole $100 units only). As part of this "
+                f"correction your balance has been {direction} by ${abs(delta):,.2f}. "
+                f"Your new balance is ${new_balance:,.2f}. See your Transactions tab "
+                f"for the full adjustment record."
+            )
+            create_notification(
+                cur, uid,
+                "Account balance updated — profit calculation correction",
+                notif_msg,
+                "ALERT" if delta < 0 else "INFO"
+            )
+            conn.commit()
+            result["applied"] = True
+            log.info(f"Single-client profit correction applied: {c['name']} {delta:+.2f}")
+        except Exception as e:
+            conn.rollback()
+            cur.close(); conn.close()
+            return err(f"Failed to apply correction: {e}")
+    elif apply:
+        # Nothing needed — already matches the current formula. Report
+        # success with applied=true so the dashboard doesn't show an error
+        # for a no-op correction.
+        result["applied"] = True
+
+    cur.close(); conn.close()
+    return ok(result)
+
 @app.route("/api/admin/migrate/flat-profit", methods=["POST"])
 @admin_required
 def admin_migrate_flat_profit():
@@ -2167,7 +2324,7 @@ start_scheduler()
 
 if __name__ == "__main__":
     print("\n" + "="*60)
-    print("   Summit Wealth v5.23 — $4.5 PROFIT PER $100 OF TOTAL DEPOSITS")
+    print("   Summit Wealth v5.25 — $4.5 PROFIT PER $100 OF TOTAL DEPOSITS")
     print("="*60)
     print(f"   URL    : http://127.0.0.1:8080")
     print(f"   Client : john@test.com  / demo1234")

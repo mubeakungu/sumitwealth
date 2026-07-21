@@ -249,8 +249,7 @@
         and is blocked if that client already has a trade logged for today.
         Use <strong style="color:#ffc800;">Fix Profit</strong> if a specific
         client's historical trade profit needs correcting to the current
-        formula — it only ever touches that one client, never anyone else,
-        and only touches days on/after the date you choose.
+        formula — it only ever touches that one client, never anyone else.
       </p>
       <div class="filter-bar">
         <input type="text" id="clientSearch" placeholder="Search by name or email..." oninput="filterClients()">
@@ -525,7 +524,7 @@
     </p>
     <div style="background:#0a0e27;border:1px solid #2a2f4a;border-radius:6px;padding:14px;margin-bottom:14px;font-size:13px;line-height:2.1;">
       <div><span style="color:#aaa;">Client:</span> <strong id="runTradeClientName"></strong></div>
-      <div><span style="color:#aaa;">Net Deposit:</span> <span id="runTradeNetDeposit" style="color:#d4af37;font-weight:bold;"></span></div>
+      <div><span style="color:#aaa;">Trading Basis</span> <span style="color:#555;font-size:10px;">(deposits − principal withdrawals; referral withdrawals excluded)</span>: <span id="runTradeNetDeposit" style="color:#d4af37;font-weight:bold;"></span></div>
     </div>
     <div style="background:rgba(255,200,0,0.08);border:1px solid rgba(255,200,0,0.35);border-radius:6px;padding:10px 12px;margin-bottom:14px;font-size:11px;color:#ffc800;line-height:1.6;">
       &#9888; This is blocked automatically if the client already has a trade logged
@@ -553,16 +552,6 @@
       withdrawals, whole $100 units only</span>) and corrects only their balance
       and trade log. No other client is read or modified by this action.
     </p>
-
-    <div class="form-group">
-      <label>Only correct days on/after (leave blank to correct ALL logged days)</label>
-      <input type="date" id="fixProfitSinceDate" onchange="onFixProfitSinceDateChange()">
-      <div style="font-size:10px;color:#666;margin-top:5px;">
-        Use this to protect older trades logged under a previous profit rate
-        (e.g. $8/$100) — only days on/after this date will be recalculated and
-        rewritten. Everything before it is left completely untouched.
-      </div>
-    </div>
 
     <div id="fixProfitSummary" style="font-size:12px;color:#aaa;margin-bottom:10px;"></div>
     <div id="fixProfitResults" class="loading">Running dry run...</div>
@@ -1228,8 +1217,15 @@ function openRunTradeModal(uid) {
   if (!c) return;
   document.getElementById('runTradeUid').value = uid;
   document.getElementById('runTradeClientName').textContent = c.name || '—';
-  const netDep = parseFloat(c.total_deposits || 0) - parseFloat(c.total_withdrawals || 0);
-  document.getElementById('runTradeNetDeposit').textContent = fmtD(netDep);
+  // trading_basis comes straight from the backend: deposits minus PRINCIPAL
+  // withdrawals only. Referral withdrawals never reduce it — they only ever
+  // draw from ref_balance, never trading principal, so they must not be
+  // subtracted here even though they're included in the client table's
+  // combined "Total Withdrawals" column.
+  const basis = c.trading_basis != null
+    ? parseFloat(c.trading_basis)
+    : Math.max(0, parseFloat(c.total_deposits || 0) - parseFloat(c.total_principal_withdrawals || 0));
+  document.getElementById('runTradeNetDeposit').textContent = fmtD(basis);
   document.getElementById('runTradeErr').classList.remove('show');
   document.getElementById('runTradeModal').classList.add('show');
 }
@@ -1262,9 +1258,7 @@ async function confirmRunTrade() {
 // all-clients "Recalculate Client Profits" tool). Wraps
 // POST /api/admin/client/<uid>/correct-profit, which only ever reads or
 // writes the ONE client it's given — it cannot touch any other client's
-// balance or trade log, unlike the old bulk endpoint. An optional
-// since_date scopes the correction to only days on/after that date, so
-// older trades logged under a previous profit rate are left untouched. ──
+// balance or trade log, unlike the old bulk endpoint. ─────────────────────
 let _fixProfitDryRunLoaded = false;
 let _fixProfitUid = null;
 
@@ -1276,7 +1270,6 @@ function openFixProfitModal(uid) {
 
   document.getElementById('fixProfitUid').value = uid;
   document.getElementById('fixProfitClientName').textContent = c.name || '—';
-  document.getElementById('fixProfitSinceDate').value = '';
   document.getElementById('fixProfitErr').classList.remove('show');
   document.getElementById('fixProfitOk').classList.remove('show');
   document.getElementById('fixProfitApplyBtn').disabled = true;
@@ -1287,19 +1280,9 @@ function openFixProfitModal(uid) {
   runFixProfitDryRun(uid);
 }
 
-function onFixProfitSinceDateChange() {
-  if (!_fixProfitUid) return;
-  document.getElementById('fixProfitOk').classList.remove('show');
-  document.getElementById('fixProfitErr').classList.remove('show');
-  setHTML('fixProfitResults', '<div class="loading">Running dry run...</div>');
-  runFixProfitDryRun(_fixProfitUid);
-}
-
 async function runFixProfitDryRun(uid) {
   try {
-    const sinceDate = document.getElementById('fixProfitSinceDate').value || undefined;
-    const body = sinceDate ? { since_date: sinceDate } : {};
-    const d = await post(`/api/admin/client/${uid}/correct-profit`, body);
+    const d = await post(`/api/admin/client/${uid}/correct-profit`, {});
     if (!d.success) {
       showError(d.error || 'Dry run failed', 'fixProfitErr');
       setHTML('fixProfitResults', '<div class="empty">Failed to load.</div>');
@@ -1317,16 +1300,10 @@ function renderFixProfitResults(data) {
   const deltaColor = data.delta < 0 ? '#ff4560' : data.delta > 0 ? '#00e090' : '#aaa';
   const needsCorrection = Math.abs(data.delta) >= 0.01;
 
-  const scopeLine = data.since_date
-    ? `Scope: days on/after <strong style="color:#d4af37;">${escHtml(data.since_date)}</strong> only ` +
-      `(<span style="color:#00e090;">${data.days_preserved || 0} earlier day(s) left untouched</span>)<br>`
-    : `Scope: <strong style="color:#ffc800;">ALL logged days</strong> (no since-date set — set one above to protect older trades)<br>`;
-
   document.getElementById('fixProfitSummary').innerHTML =
-    scopeLine +
     `Deposits minus withdrawals: <strong style="color:#d4af37;">${fmtD(data.total_deposit)}</strong> — ` +
-    `${data.days_traded} day(s) in scope — correct daily rate: <strong style="color:#d4af37;">${fmtD(data.flat_daily)}</strong><br>` +
-    `Old total profit (in-scope days): <strong>${fmtD(data.old_total_profit)}</strong> → ` +
+    `${data.days_traded} day(s) traded — correct daily rate: <strong style="color:#d4af37;">${fmtD(data.flat_daily)}</strong><br>` +
+    `Old total profit: <strong>${fmtD(data.old_total_profit)}</strong> → ` +
     `Correct total profit: <strong>${fmtD(data.correct_total_profit)}</strong> ` +
     `(<span style="color:${deltaColor};font-weight:bold;">${data.delta >= 0 ? '+' : ''}${fmtD(data.delta)}</span>)<br>` +
     `Current balance: <strong>${fmtD(data.current_balance)}</strong> → New balance: <strong style="color:${deltaColor};">${fmtD(data.new_balance)}</strong>`;
@@ -1334,7 +1311,7 @@ function renderFixProfitResults(data) {
   document.getElementById('fixProfitApplyBtn').disabled = !needsCorrection;
 
   if (!needsCorrection) {
-    setHTML('fixProfitResults', '<div class="empty">&#9989; The in-scope days already match the current formula — nothing to correct.</div>');
+    setHTML('fixProfitResults', '<div class="empty">&#9989; This client\'s trade log already matches the current formula — nothing to correct.</div>');
     return;
   }
 
@@ -1363,11 +1340,7 @@ async function confirmFixProfit() {
   btn.innerHTML = 'Applying...';
 
   try {
-    const sinceDate = document.getElementById('fixProfitSinceDate').value || undefined;
-    const body = { apply: true };
-    if (sinceDate) body.since_date = sinceDate;
-
-    const d = await post(`/api/admin/client/${_fixProfitUid}/correct-profit`, body);
+    const d = await post(`/api/admin/client/${_fixProfitUid}/correct-profit`, { apply: true });
     if (!d.success) {
       showError(d.error || 'Correction failed', 'fixProfitErr');
       btn.disabled = false;

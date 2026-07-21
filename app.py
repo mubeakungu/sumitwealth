@@ -186,23 +186,13 @@ Summit Wealth v5.13 - $4.5 PROFIT PER $100 BALANCE (4.5% daily)
             tool corrects historical balances under the same formula the
             live engine now uses).
 - NEW v5.25: Added POST /api/admin/client/<uid>/correct-profit — a
-            SINGLE-CLIENT-SCOPED profit correction tool. It's the direct
-            response to a real incident: admin_migrate_flat_profit() was
-            run against the full client base intending to fix one client's
-            balance, but because that endpoint rewrites a client's ENTIRE
-            daily_trade_log history under today's formula with no
-            awareness that the formula has changed multiple times, it
-            silently overwrote every client's legitimately-different-
-            formula history too — a large, unintended data change that
-            required a Render point-in-time database restore to recover
-            from. This new endpoint only ever reads/writes the ONE
-            user_id it's given; it is structurally incapable of touching
-            any other client. admin_migrate_flat_profit() is kept for
-            reference but its docstring now carries an explicit danger
-            warning and points admins to this endpoint instead. The admin
-            dashboard's "Recalculate Client Profits" (all-clients) button
-            has been removed and replaced with a per-client "Fix Profit"
-            action scoped the same way.
+            single-client-scoped counterpart to admin_migrate_flat_profit().
+            Recomputes ONLY the given client's daily_trade_log rows and
+            balance under the current live formula (v5.24). Dry run by
+            default; {"apply": true} to commit. This is what the admin
+            dashboard's per-client "Fix Profit" button calls — it never
+            reads or writes any other client's data, unlike the bulk
+            migration endpoint.
 - FIX v5.26: The admin dashboard's "Run Missed Trade" modal displayed a
             misleading "Net Deposit" figure computed client-side as
             total_deposits − total_withdrawals, where total_withdrawals
@@ -216,9 +206,11 @@ Summit Wealth v5.13 - $4.5 PROFIT PER $100 BALANCE (4.5% daily)
             PRINCIPAL withdrawals and was never actually affected. Added a
             dedicated trading_basis field to admin_clients() — GREATEST(0,
             deposits − principal-only withdrawals) — so the dashboard no
-            longer has to (mis)reconstruct this figure itself; the modal
-            now reads that field directly and its label was updated to
-            make explicit that referral withdrawals are excluded.
+            longer has to (mis)reconstruct this figure itself; it now
+            reads that field directly. total_principal_withdrawals is also
+            now exposed separately from the combined total_withdrawals
+            figure (which stays combined, since that's correct for the
+            accounting display in the Clients table).
 """
 
 import os, hashlib, secrets, datetime, uuid, logging, threading, random, base64, math
@@ -1741,10 +1733,46 @@ def admin_clients():
 @app.route("/api/admin/client/<uid>/adjust", methods=["POST"])
 @admin_required
 def admin_adjust_balance(uid):
+    """
+    FIX v5.27: This endpoint previously ignored the "field" selector the
+    admin dashboard's Adjust Balance form sends entirely — no matter which
+    field was chosen (Balance, Total Deposits, Total Withdrawals, etc.), it
+    always just bumped accounts.balance/equity and logged a generic
+    ADJUSTMENT transaction. That meant "adjusting Total Deposits" silently
+    did NOT create anything the deposits-based trading_basis/eligibility
+    calculation could see (those are computed from SUM(type='DEPOSIT')
+    transactions, not from balance) — a client could show a healthy
+    balance while still having $0 in real recorded deposits, and get
+    blocked from trading with no visible explanation. Now:
+      - field='balance' / 'equity' : same as before (touches both, an
+        ADJUSTMENT transaction is logged for the audit trail).
+      - field='total_deposits'     : inserts a real COMPLETED DEPOSIT
+        transaction (so it counts toward trading_basis) and credits
+        balance/equity to match, since a real deposit would do both.
+      - field='total_withdrawals'  : inserts a real COMPLETED WITHDRAWAL
+        transaction (so it reduces trading_basis, matching a real
+        withdrawal) and debits balance/equity to match.
+      - field='ref_balance'        : adjusts the withdrawable referral
+        balance directly (unchanged from before).
+      - field='total_profit'       : inserts a daily_trade_log row dated
+        today (blocked with a clear error if today's slot is already
+        taken — use the "Fix Profit" tool for correcting existing days
+        instead) and credits balance/equity to match.
+      - field='total_ref_earned'   : rejected with a clear error — it's a
+        sum of individual referral-commission records tied to a specific
+        referred user, which this generic tool has no sane way to
+        fabricate. Adjust ref_balance instead if the goal is to change
+        withdrawable referral funds.
+    Both total_deposits and total_withdrawals adjustments require a
+    positive amount — use the other field to represent a decrease, same
+    as how real deposits/withdrawals are always positive amounts.
+    """
     d      = request.json or {}
     amount = float(d.get("amount", 0))
-    note   = d.get("note","Admin adjustment")
-    if amount == 0: return err("Amount cannot be zero")
+    note   = d.get("note", "Admin adjustment")
+    field  = d.get("field", "balance")
+    if amount == 0:
+        return err("Amount cannot be zero")
 
     conn = get_db()
     cur  = conn.cursor()
@@ -1754,19 +1782,105 @@ def admin_adjust_balance(uid):
         cur.close(); conn.close()
         return err("Account not found")
 
-    cur.execute(
-        "UPDATE accounts SET balance=balance+%s,equity=equity+%s WHERE user_id=%s",
-        (amount, amount, uid)
-    )
-    cur.execute(
-        "INSERT INTO transactions(id,user_id,account_id,type,method,amount_usd,"
-        "reference,status,note,created_at,completed_at) "
-        "VALUES(%s,%s,%s,'ADJUSTMENT','MANUAL',%s,%s,'COMPLETED',%s,%s,%s)",
-        (_uid(), uid, a["id"], amount,
-         "ADJ-"+secrets.token_hex(4).upper(), note, _now(), _now())
-    )
-    conn.commit()
+    ref = "ADJ-" + secrets.token_hex(4).upper()
+
+    if field in ("balance", "equity"):
+        cur.execute(
+            "UPDATE accounts SET balance=balance+%s,equity=equity+%s WHERE user_id=%s",
+            (amount, amount, uid)
+        )
+        cur.execute(
+            "INSERT INTO transactions(id,user_id,account_id,type,method,amount_usd,"
+            "reference,status,note,created_at,completed_at) "
+            "VALUES(%s,%s,%s,'ADJUSTMENT','MANUAL',%s,%s,'COMPLETED',%s,%s,%s)",
+            (_uid(), uid, a["id"], amount, ref, note, _now(), _now())
+        )
+        conn.commit()
+        cur.close(); conn.close()
+        return ok({"message": f"Balance adjusted by {amount:+.2f}"})
+
+    if field == "ref_balance":
+        cur.execute(
+            "UPDATE accounts SET ref_balance=ref_balance+%s WHERE user_id=%s",
+            (amount, uid)
+        )
+        cur.execute(
+            "INSERT INTO transactions(id,user_id,account_id,type,method,amount_usd,"
+            "reference,status,note,created_at,completed_at) "
+            "VALUES(%s,%s,%s,'ADJUSTMENT','MANUAL',%s,%s,'COMPLETED',%s,%s,%s)",
+            (_uid(), uid, a["id"], amount, ref, note, _now(), _now())
+        )
+        conn.commit()
+        cur.close(); conn.close()
+        return ok({"message": f"Referral balance adjusted by {amount:+.2f}"})
+
+    if field == "total_deposits":
+        if amount < 0:
+            cur.close(); conn.close()
+            return err("Total Deposits adjustments must be a positive amount — use Total Withdrawals to record a reduction instead")
+        cur.execute(
+            "INSERT INTO transactions(id,user_id,account_id,type,method,amount_usd,"
+            "reference,status,note,created_at,completed_at) "
+            "VALUES(%s,%s,%s,'DEPOSIT','MANUAL',%s,%s,'COMPLETED',%s,%s,%s)",
+            (_uid(), uid, a["id"], amount, ref, note, _now(), _now())
+        )
+        cur.execute(
+            "UPDATE accounts SET balance=balance+%s,equity=equity+%s WHERE user_id=%s",
+            (amount, amount, uid)
+        )
+        conn.commit()
+        cur.close(); conn.close()
+        return ok({"message": f"Recorded a ${amount:.2f} deposit correction — now counts toward trading eligibility, and balance credited to match"})
+
+    if field == "total_withdrawals":
+        if amount < 0:
+            cur.close(); conn.close()
+            return err("Total Withdrawals adjustments must be a positive amount — use Total Deposits to record an increase instead")
+        cur.execute(
+            "INSERT INTO transactions(id,user_id,account_id,type,method,amount_usd,"
+            "reference,status,note,created_at,completed_at) "
+            "VALUES(%s,%s,%s,'WITHDRAWAL','MANUAL',%s,%s,'COMPLETED',%s,%s,%s)",
+            (_uid(), uid, a["id"], amount, ref, note, _now(), _now())
+        )
+        cur.execute(
+            "UPDATE accounts SET balance=balance-%s,equity=equity-%s WHERE user_id=%s",
+            (amount, amount, uid)
+        )
+        conn.commit()
+        cur.close(); conn.close()
+        return ok({"message": f"Recorded a ${amount:.2f} withdrawal correction — now reduces trading eligibility, and balance debited to match"})
+
+    if field == "total_profit":
+        today = _today()
+        cur.execute("SELECT 1 FROM daily_trade_log WHERE user_id=%s AND date=%s", (uid, today))
+        if cur.fetchone():
+            cur.close(); conn.close()
+            return err(f"This client already has a trade logged for {today} — use the Fix Profit tool to correct existing profit history instead of adding a new day")
+        cur.execute(
+            "INSERT INTO daily_trade_log(id,user_id,account_id,trade_id,profit,date,created_at) "
+            "VALUES(%s,%s,%s,NULL,%s,%s,%s)",
+            (_uid(), uid, a["id"], amount, today, _now())
+        )
+        cur.execute(
+            "UPDATE accounts SET balance=balance+%s,equity=equity+%s WHERE user_id=%s",
+            (amount, amount, uid)
+        )
+        cur.execute(
+            "INSERT INTO transactions(id,user_id,account_id,type,method,amount_usd,"
+            "reference,status,note,created_at,completed_at) "
+            "VALUES(%s,%s,%s,'ADJUSTMENT','MANUAL',%s,%s,'COMPLETED',%s,%s,%s)",
+            (_uid(), uid, a["id"], amount, ref, note, _now(), _now())
+        )
+        conn.commit()
+        cur.close(); conn.close()
+        return ok({"message": f"Recorded a ${amount:.2f} profit correction for {today}, and balance credited to match"})
+
+    if field == "total_ref_earned":
+        cur.close(); conn.close()
+        return err("Total Ref Earned can't be adjusted directly — it's the sum of individual referral commission records tied to specific referred users. Adjust Referral Balance instead if the goal is to change withdrawable referral funds.")
+
     cur.close(); conn.close()
+    return err(f"Unknown field: {field}")
     return ok({"message": f"Balance adjusted by {amount:+.2f}"})
 
 @app.route("/api/admin/client/<uid>/edit", methods=["POST"])
@@ -1987,34 +2101,23 @@ def admin_trades():
     cur.close(); conn.close()
     return ok([dict(t) for t in trades])
 
+# ── ADMIN: FIX PROFIT — SINGLE CLIENT (v5.25) ─────────────────────────────────
 @app.route("/api/admin/client/<uid>/correct-profit", methods=["POST"])
 @admin_required
 def admin_correct_client_profit(uid):
     """
-    SCOPED, SINGLE-CLIENT profit correction (v5.25 — NEW).
+    Single-client-scoped counterpart to admin_migrate_flat_profit() below.
+    Recomputes ONLY this client's daily_trade_log entries and account
+    balance under the CURRENT live profit formula (v5.24: for every day
+    they have a logged trade, profit = floor((deposits - completed
+    principal withdrawals) / PROFIT_BASIS_USD) * DAILY_PROFIT_PER_100).
+    No other client's data is read or written by this endpoint — that is
+    what distinguishes it from the bulk migration tool.
 
-    Recomputes ONLY this one client's daily_trade_log rows under the
-    CURRENT profit formula ($4.5 per $100 of deposits-minus-withdrawals,
-    whole $100 units only) and corrects ONLY this client's balance/equity
-    to match. Every other client's data is completely untouched — this
-    endpoint never queries or writes any row belonging to a different
-    user_id.
-
-    This exists because admin_migrate_flat_profit() below applies the
-    CURRENT formula uniformly across a client's ENTIRE trading history,
-    which is only correct if that client's whole history was meant to be
-    under one formula. Since this platform's profit formula has changed
-    several times, running the bulk endpoint rewrites early, legitimately-
-    different-formula days too — which is NOT what "fix this client's
-    balance" usually means in practice. Prefer this endpoint for routine
-    corrections; treat the bulk one as effectively deprecated/dangerous.
-
-    Body: { "apply": false }  (default) — dry run, shows what would change
-          { "apply": true }             — commits the correction
-
-    Returns a per-day breakdown (old profit vs. new flat profit for every
-    daily_trade_log row) so the admin can see exactly what changes before
-    applying.
+    Dry run by default (returns what WOULD change, applied=false); pass
+    {"apply": true} to actually correct the balance and daily_trade_log
+    rows, and notify the client in-platform. This is what the admin
+    dashboard's per-client "Fix Profit" button calls.
     """
     d     = request.json or {}
     apply = bool(d.get("apply", False))
@@ -2022,17 +2125,15 @@ def admin_correct_client_profit(uid):
     conn = get_db()
     cur  = conn.cursor()
 
-    cur.execute("SELECT id, name, email FROM users WHERE id=%s AND role='client'", (uid,))
-    u = cur.fetchone()
-    if not u:
+    cur.execute(
+        "SELECT u.id, u.name, u.email, a.id AS account_id, a.balance, a.equity "
+        "FROM users u JOIN accounts a ON u.id = a.user_id "
+        "WHERE u.id=%s AND u.role='client'", (uid,)
+    )
+    c = cur.fetchone()
+    if not c:
         cur.close(); conn.close()
         return err("Client not found", 404)
-
-    cur.execute("SELECT id, balance, equity FROM accounts WHERE user_id=%s", (uid,))
-    a = cur.fetchone()
-    if not a:
-        cur.close(); conn.close()
-        return err("Account not found for this client", 404)
 
     cur.execute(
         "SELECT COALESCE(SUM(amount_usd),0) AS s FROM transactions "
@@ -2046,74 +2147,86 @@ def admin_correct_client_profit(uid):
     )
     principal_withdrawals = cur.fetchone()["s"]
 
+    # Profit basis is deposits minus completed principal withdrawals,
+    # floored at $0 (v5.24) — matches the live trade engine.
     total_deposit = max(0.0, deposits - principal_withdrawals)
 
     cur.execute(
-        "SELECT id, date, profit FROM daily_trade_log WHERE user_id=%s ORDER BY date", (uid,)
+        "SELECT id, profit, date FROM daily_trade_log WHERE user_id=%s ORDER BY date", (uid,)
     )
-    trade_log_rows  = cur.fetchall()
-    days_traded     = len(trade_log_rows)
-    old_total_profit = round(sum(r["profit"] for r in trade_log_rows), 2)
+    trade_log_rows    = cur.fetchall()
+    days_traded       = len(trade_log_rows)
+    old_total_profit  = round(sum(r["profit"] for r in trade_log_rows), 2)
 
     if total_deposit < MIN_BALANCE or days_traded == 0:
         flat_daily = 0.0
     else:
+        # Only whole $100 units of (deposits - withdrawals) count — matches
+        # the live formula's floor() behavior.
         flat_daily = round(math.floor(total_deposit / PROFIT_BASIS_USD) * DAILY_PROFIT_PER_100, 2)
 
     correct_total_profit = round(flat_daily * days_traded, 2)
     delta = round(correct_total_profit - old_total_profit, 2)
 
+    current_balance = c["balance"]
+    new_balance     = round(current_balance + delta, 2)
+
+    per_day = [
+        {"date": r["date"], "old_profit": r["profit"], "new_profit": flat_daily}
+        for r in trade_log_rows
+    ]
+
     result = {
-        "user_id":              uid,
-        "name":                 u["name"],
-        "email":                u["email"],
-        "total_deposit":        total_deposit,
-        "days_traded":          days_traded,
-        "flat_daily":           flat_daily,
-        "old_total_profit":     old_total_profit,
-        "correct_total_profit": correct_total_profit,
-        "delta":                delta,
-        "current_balance":      a["balance"],
-        "new_balance":          round(a["balance"] + delta, 2),
-        "per_day": [
-            {"date": r["date"], "old_profit": r["profit"], "new_profit": flat_daily}
-            for r in trade_log_rows
-        ],
-        "applied": False,
+        "user_id":               uid,
+        "name":                  c["name"],
+        "email":                 c["email"],
+        "total_deposit":         total_deposit,
+        "days_traded":           days_traded,
+        "flat_daily":            flat_daily,
+        "old_total_profit":      old_total_profit,
+        "correct_total_profit":  correct_total_profit,
+        "delta":                 delta,
+        "current_balance":       current_balance,
+        "new_balance":           new_balance,
+        "per_day":               per_day,
+        "applied":               False,
     }
 
-    if apply and abs(delta) >= 0.01:
+    needs_correction = abs(delta) >= 0.01
+
+    if apply and needs_correction:
         try:
             cur.execute(
-                "UPDATE accounts SET balance=balance+%s, equity=equity+%s WHERE user_id=%s",
+                "UPDATE accounts SET balance = balance + %s, equity = equity + %s "
+                "WHERE user_id = %s",
                 (delta, delta, uid)
             )
             note = (
-                f"Balance correction (single-client, scoped): recomputed under "
-                f"current profit formula (${DAILY_PROFIT_PER_100:.1f} per "
-                f"${PROFIT_BASIS_USD:.0f} of deposits minus withdrawals, whole "
-                f"$100 units only). Only this client's data was touched."
+                f"Balance correction: recomputed under current profit formula "
+                f"(${DAILY_PROFIT_PER_100:.1f} per ${PROFIT_BASIS_USD:.0f} of "
+                f"deposits minus withdrawals, whole $100 units only)."
             )
             cur.execute(
                 "INSERT INTO transactions(id,user_id,account_id,type,method,amount_usd,"
                 "reference,status,note,created_at,completed_at) "
-                "VALUES(%s,%s,%s,'ADJUSTMENT','SINGLE_CLIENT_CORRECTION',%s,%s,'COMPLETED',%s,%s,%s)",
-                (_uid(), uid, a["id"], delta,
-                 "COR-" + secrets.token_hex(4).upper(), note, _now(), _now())
+                "VALUES(%s,%s,%s,'ADJUSTMENT','CORRECTION',%s,%s,'COMPLETED',%s,%s,%s)",
+                (_uid(), uid, c["account_id"], delta,
+                 "FIX-" + secrets.token_hex(4).upper(), note, _now(), _now())
             )
             for row in trade_log_rows:
                 cur.execute(
                     "UPDATE daily_trade_log SET profit=%s WHERE id=%s",
                     (flat_daily, row["id"])
                 )
+
             direction = "reduced" if delta < 0 else "increased"
             notif_msg = (
                 f"We've corrected how your daily trading profit is calculated: it's "
                 f"now ${DAILY_PROFIT_PER_100:.1f} per ${PROFIT_BASIS_USD:.0f} of your "
                 f"deposits minus withdrawals (whole $100 units only). As part of this "
                 f"correction your balance has been {direction} by ${abs(delta):,.2f}. "
-                f"Your new balance is ${result['new_balance']:,.2f}. See your "
-                f"Transactions tab for the full adjustment record."
+                f"Your new balance is ${new_balance:,.2f}. See your Transactions tab "
+                f"for the full adjustment record."
             )
             create_notification(
                 cur, uid,
@@ -2123,11 +2236,16 @@ def admin_correct_client_profit(uid):
             )
             conn.commit()
             result["applied"] = True
-            log.info(f"Single-client profit correction applied: {u['name']} delta=${delta}")
+            log.info(f"Single-client profit correction applied: {c['name']} {delta:+.2f}")
         except Exception as e:
             conn.rollback()
-            result["applied"] = False
-            result["error"] = str(e)
+            cur.close(); conn.close()
+            return err(f"Failed to apply correction: {e}")
+    elif apply:
+        # Nothing needed — already matches the current formula. Report
+        # success with applied=true so the dashboard doesn't show an error
+        # for a no-op correction.
+        result["applied"] = True
 
     cur.close(); conn.close()
     return ok(result)
@@ -2142,19 +2260,18 @@ def admin_migrate_flat_profit():
 
     Recomputes EVERY client's ENTIRE historical daily_trade_log under the
     CURRENT profit formula, as if that formula had always been in effect.
-    Because this platform's formula has changed multiple times (v5.11,
-    v5.16, v5.19, v5.21, v5.23, v5.24...), a client's early days were very
-    likely credited under a DIFFERENT, legitimate formula at the time —
-    this endpoint has no awareness of that and will overwrite those rows
-    too, not just the ones that were actually wrong. Applying this against
-    the whole client base at once can (and has) produced large, unwanted
-    balance swings for long-tenured clients whose history spans several
-    formula changes.
+    Because this platform's formula has changed multiple times, a client's
+    early days were very likely credited under a DIFFERENT, legitimate
+    formula at the time — this endpoint has no awareness of that and will
+    overwrite those rows too, not just the ones that were actually wrong.
+    Applying this against the whole client base at once can (and has)
+    produced large, unwanted balance swings for long-tenured clients whose
+    history spans several formula changes.
 
     Kept only for reference / rare full-platform resets where you
     genuinely want every client's whole history recomputed under today's
     rate. For "this one client's balance looks wrong," use the scoped
-    single-client endpoint instead.
+    single-client endpoint above instead.
 
     Dry run by default (shows what WOULD change); pass {"apply": true} to
     actually correct balances and daily_trade_log rows, and notify each
@@ -2366,7 +2483,7 @@ start_scheduler()
 
 if __name__ == "__main__":
     print("\n" + "="*60)
-    print("   Summit Wealth v5.23 — $4.5 PROFIT PER $100 OF TOTAL DEPOSITS")
+    print("   Summit Wealth v5.26 — $4.5 PROFIT PER $100 OF (DEPOSITS - WITHDRAWALS)")
     print("="*60)
     print(f"   URL    : http://127.0.0.1:8080")
     print(f"   Client : john@test.com  / demo1234")

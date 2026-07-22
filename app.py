@@ -168,23 +168,11 @@ Summit Wealth v5.13 - $4.5 PROFIT PER $100 BALANCE (4.5% daily)
             deposit-based formula and correct their account balance to
             match — this is the tool to use for a client who, e.g., has 4
             days of trades logged at the wrong amount.
-- CHANGE v5.24: SUPERSEDES v5.23's gross-deposit-only basis — the profit
-            basis is now (total completed DEPOSITs − total completed
-            principal WITHDRAWALs), floored at $0, computed fresh from the
-            database on every trade run. REFERRAL_WITHDRAWAL is still
-            excluded (draws only from ref_balance). This was requested
-            directly: withdrawing deposited principal should immediately
-            stop that money from generating further profit. Because the
-            basis is recalculated live (not cached) every time
-            run_daily_trades()/admin_run_single_client_trade() executes,
-            the effect is immediate — the moment a withdrawal transaction
-            flips to COMPLETED (on admin approval), the very next trade
-            run reflects the reduced basis, with no separate "close the
-            trade" action needed. Applied in run_daily_trades(),
-            admin_run_single_client_trade(), client_summary(), and
-            admin_migrate_flat_profit() (for consistency, so the migration
-            tool corrects historical balances under the same formula the
-            live engine now uses).
+- CHANGE v5.24: SUPERSEDED — see v5.27. Previously the profit basis was
+            (total completed DEPOSITs − total completed principal
+            WITHDRAWALs), floored at $0. That subtraction has now been
+            removed entirely; see v5.27 below for the current (reverted)
+            behavior.
 - NEW v5.25: Added POST /api/admin/client/<uid>/correct-profit — a
             SINGLE-CLIENT-SCOPED profit correction tool. It's the direct
             response to a real incident: admin_migrate_flat_profit() was
@@ -210,15 +198,27 @@ Summit Wealth v5.13 - $4.5 PROFIT PER $100 BALANCE (4.5% daily)
             REFERRAL_WITHDRAWAL together. A client who had only ever
             withdrawn referral commissions (never touching trading
             principal) would show a deeply negative figure there and
-            appear ineligible, even though the actual backend eligibility
-            check (run_daily_trades()/admin_run_single_client_trade(),
-            both already correct since v5.24) only ever subtracts
-            PRINCIPAL withdrawals and was never actually affected. Added a
-            dedicated trading_basis field to admin_clients() — GREATEST(0,
-            deposits − principal-only withdrawals) — so the dashboard no
-            longer has to (mis)reconstruct this figure itself; the modal
-            now reads that field directly and its label was updated to
-            make explicit that referral withdrawals are excluded.
+            appear ineligible. Added a dedicated trading_basis field to
+            admin_clients() so the dashboard doesn't have to reconstruct
+            this figure itself. Superseded by v5.27 below, which changes
+            what trading_basis actually measures.
+- CHANGE v5.27: SUPERSEDES v5.24/v5.26 — withdrawals (of ANY type,
+            including plain principal WITHDRAWAL) no longer reduce trade
+            eligibility or the profit basis AT ALL. This was requested
+            directly after a case where a client's referral withdrawals
+            were correctly excluded but a separate, real WITHDRAWAL of
+            principal exceeded their deposit total and zeroed out their
+            basis — the decision was to stop subtracting withdrawals from
+            the basis entirely rather than distinguish "principal" vs
+            "profit" withdrawals. The basis is now simply a client's GROSS
+            TOTAL COMPLETED DEPOSITS, exactly as in v5.23, with the
+            whole-$100-unit floor still applied. Applied in
+            run_daily_trades(), admin_run_single_client_trade(),
+            client_summary(), admin_correct_client_profit(),
+            admin_migrate_flat_profit(), and the trading_basis field in
+            admin_clients(). The total_principal_withdrawals field is kept
+            in admin_clients() for display/reference only — it no longer
+            feeds into trading_basis.
 """
 
 import os, hashlib, secrets, datetime, uuid, logging, threading, random, base64, math
@@ -556,35 +556,24 @@ def run_daily_trades():
 
         conn = get_db()
         cur  = conn.cursor()
+        # CHANGE v5.27: profit basis is GROSS TOTAL DEPOSITS ONLY —
+        # withdrawals (of any type) no longer reduce it.
         cur.execute(
             "SELECT u.id, u.name, a.id AS account_id, a.balance, "
-            "  GREATEST(0, "
-            "    COALESCE((SELECT SUM(amount_usd) FROM transactions "
-            "              WHERE user_id=u.id AND type='DEPOSIT' AND status='COMPLETED'), 0) "
-            "    - COALESCE((SELECT SUM(amount_usd) FROM transactions "
-            "                WHERE user_id=u.id AND type='WITHDRAWAL' AND status='COMPLETED'), 0) "
-            "  ) AS total_deposit "
+            "  COALESCE((SELECT SUM(amount_usd) FROM transactions "
+            "            WHERE user_id=u.id AND type='DEPOSIT' AND status='COMPLETED'), 0) "
+            "  AS total_deposit "
             "FROM users u JOIN accounts a ON u.id=a.user_id "
             "WHERE u.role='client'"
         )
         all_clients = cur.fetchall()
-        # Profit basis is TOTAL DEPOSITS MINUS COMPLETED WITHDRAWALS, floored
-        # at $0 (v5.24). This is computed fresh from the database every time
-        # a trade runs, so the moment a withdrawal is approved (status flips
-        # to COMPLETED and the money leaves the account), the very next
-        # trade run — scheduled or manual — immediately reflects the
-        # reduced basis. A client who withdraws their full deposited amount
-        # drops straight to $0 basis and stops earning profit from that
-        # point on, with no lag. REFERRAL_WITHDRAWAL is intentionally
-        # excluded — it only ever draws from ref_balance, never principal.
-        # Current balance is still not read for the calculation itself.
         clients = [c for c in all_clients if c["total_deposit"] >= MIN_BALANCE]
-        log.info(f"  Eligible clients (deposits - withdrawals >= ${MIN_BALANCE}): {len(clients)}")
+        log.info(f"  Eligible clients (total deposits >= ${MIN_BALANCE}): {len(clients)}")
         paid = 0
 
         for c in clients:
-            # Only whole $100 units of (deposits - withdrawals) count — a
-            # partial remainder below $100 does not earn a partial profit.
+            # Only whole $100 units of total deposits count — a partial
+            # remainder below $100 does not earn a partial profit.
             client_profit   = round(math.floor(c["total_deposit"] / PROFIT_BASIS_USD) * DAILY_PROFIT_PER_100, 2)
             client_quantity = round(client_profit / price_diff, 6)
 
@@ -970,18 +959,6 @@ def client_summary():
         SELECT COALESCE(SUM(amount_usd), 0) AS s
         FROM transactions
         WHERE user_id = %s
-          AND type = 'WITHDRAWAL'
-          AND status = 'COMPLETED'
-        """,
-        (uid,)
-    )
-    principal_wdr = cur.fetchone()
-
-    cur.execute(
-        """
-        SELECT COALESCE(SUM(amount_usd), 0) AS s
-        FROM transactions
-        WHERE user_id = %s
           AND type IN ('WITHDRAWAL', 'REFERRAL_WITHDRAWAL')
           AND status = 'PENDING'
         """,
@@ -1016,10 +993,10 @@ def client_summary():
     conn.close()
 
     balance      = a["balance"] if a else 0
-    # Profit basis is TOTAL DEPOSITS MINUS COMPLETED WITHDRAWALS, floored at
-    # $0 (v5.24) — matches run_daily_trades()/admin_run_single_client_trade().
-    # Current balance is not used for this calculation, only displayed above.
-    net_deposit  = max(0.0, dep["s"] - principal_wdr["s"])
+    # CHANGE v5.27: profit basis is GROSS TOTAL DEPOSITS ONLY — withdrawals
+    # no longer reduce it. net_deposit is kept as the field name for
+    # backward compatibility with the client dashboard.
+    net_deposit  = dep["s"]
     # Only whole $100 units of the basis count toward profit — a
     # remainder below $100 doesn't earn a partial amount.
     expected_daily = round(math.floor(net_deposit / PROFIT_BASIS_USD) * DAILY_PROFIT_PER_100, 2) if net_deposit >= MIN_BALANCE else 0
@@ -1710,6 +1687,9 @@ def admin_reject_withdrawal():
 def admin_clients():
     conn = get_db()
     cur  = conn.cursor()
+    # CHANGE v5.27: trading_basis is now GROSS TOTAL DEPOSITS ONLY —
+    # withdrawals no longer reduce it. total_principal_withdrawals is kept
+    # for display/reference only.
     cur.execute(
         "SELECT u.id, u.name, u.email, u.phone, u.referral_code, u.created_at, "
         "a.balance, a.equity, a.ref_balance, "
@@ -1723,12 +1703,8 @@ def admin_clients():
         " AND status='COMPLETED') AS total_withdrawals, "
         "(SELECT COALESCE(SUM(amount_usd),0) FROM transactions "
         " WHERE user_id=u.id AND type='WITHDRAWAL' AND status='COMPLETED') AS total_principal_withdrawals, "
-        "GREATEST(0, "
-        "  (SELECT COALESCE(SUM(amount_usd),0) FROM transactions "
-        "   WHERE user_id=u.id AND type='DEPOSIT' AND status='COMPLETED') "
-        "  - (SELECT COALESCE(SUM(amount_usd),0) FROM transactions "
-        "     WHERE user_id=u.id AND type='WITHDRAWAL' AND status='COMPLETED') "
-        ") AS trading_basis, "
+        "(SELECT COALESCE(SUM(amount_usd),0) FROM transactions "
+        " WHERE user_id=u.id AND type='DEPOSIT' AND status='COMPLETED') AS trading_basis, "
         "(SELECT COALESCE(SUM(commission_usd),0) FROM referrals "
         " WHERE referrer_id=u.id) AS total_ref_earned "
         "FROM users u LEFT JOIN accounts a ON u.id=a.user_id "
@@ -1856,14 +1832,13 @@ def admin_run_single_client_trade():
     conn = get_db()
     cur  = conn.cursor()
 
+    # CHANGE v5.27: profit basis is GROSS TOTAL DEPOSITS ONLY — withdrawals
+    # no longer reduce it.
     cur.execute(
         "SELECT u.id, u.name, a.id AS account_id, a.balance, "
-        "  GREATEST(0, "
-        "    COALESCE((SELECT SUM(amount_usd) FROM transactions "
-        "              WHERE user_id=u.id AND type='DEPOSIT' AND status='COMPLETED'), 0) "
-        "    - COALESCE((SELECT SUM(amount_usd) FROM transactions "
-        "                WHERE user_id=u.id AND type='WITHDRAWAL' AND status='COMPLETED'), 0) "
-        "  ) AS total_deposit "
+        "  COALESCE((SELECT SUM(amount_usd) FROM transactions "
+        "            WHERE user_id=u.id AND type='DEPOSIT' AND status='COMPLETED'), 0) "
+        "  AS total_deposit "
         "FROM users u JOIN accounts a ON u.id=a.user_id "
         "WHERE u.id=%s AND u.role='client'", (uid,)
     )
@@ -1872,11 +1847,9 @@ def admin_run_single_client_trade():
         cur.close(); conn.close()
         return err("Client not found", 404)
 
-    # Profit basis is deposits minus completed withdrawals, floored at $0
-    # (v5.24) — see note at top of file.
     if c["total_deposit"] < MIN_BALANCE:
         cur.close(); conn.close()
-        return err(f"Client's deposits minus withdrawals (${c['total_deposit']:.2f}) is below minimum (${MIN_BALANCE})")
+        return err(f"Client's total deposits (${c['total_deposit']:.2f}) is below minimum (${MIN_BALANCE})")
 
     today = _today()
 
@@ -1991,30 +1964,17 @@ def admin_trades():
 @admin_required
 def admin_correct_client_profit(uid):
     """
-    SCOPED, SINGLE-CLIENT profit correction (v5.25 — NEW).
+    SCOPED, SINGLE-CLIENT profit correction (v5.25).
 
     Recomputes ONLY this one client's daily_trade_log rows under the
-    CURRENT profit formula ($4.5 per $100 of deposits-minus-withdrawals,
-    whole $100 units only) and corrects ONLY this client's balance/equity
-    to match. Every other client's data is completely untouched — this
-    endpoint never queries or writes any row belonging to a different
-    user_id.
-
-    This exists because admin_migrate_flat_profit() below applies the
-    CURRENT formula uniformly across a client's ENTIRE trading history,
-    which is only correct if that client's whole history was meant to be
-    under one formula. Since this platform's profit formula has changed
-    several times, running the bulk endpoint rewrites early, legitimately-
-    different-formula days too — which is NOT what "fix this client's
-    balance" usually means in practice. Prefer this endpoint for routine
-    corrections; treat the bulk one as effectively deprecated/dangerous.
+    CURRENT profit formula ($4.5 per $100 of gross total deposits, whole
+    $100 units only — CHANGE v5.27) and corrects ONLY this client's
+    balance/equity to match. Every other client's data is completely
+    untouched — this endpoint never queries or writes any row belonging
+    to a different user_id.
 
     Body: { "apply": false }  (default) — dry run, shows what would change
           { "apply": true }             — commits the correction
-
-    Returns a per-day breakdown (old profit vs. new flat profit for every
-    daily_trade_log row) so the admin can see exactly what changes before
-    applying.
     """
     d     = request.json or {}
     apply = bool(d.get("apply", False))
@@ -2040,13 +2000,8 @@ def admin_correct_client_profit(uid):
     )
     deposits = cur.fetchone()["s"]
 
-    cur.execute(
-        "SELECT COALESCE(SUM(amount_usd),0) AS s FROM transactions "
-        "WHERE user_id=%s AND type='WITHDRAWAL' AND status='COMPLETED'", (uid,)
-    )
-    principal_withdrawals = cur.fetchone()["s"]
-
-    total_deposit = max(0.0, deposits - principal_withdrawals)
+    # CHANGE v5.27: profit basis is GROSS TOTAL DEPOSITS ONLY.
+    total_deposit = deposits
 
     cur.execute(
         "SELECT id, date, profit FROM daily_trade_log WHERE user_id=%s ORDER BY date", (uid,)
@@ -2091,8 +2046,8 @@ def admin_correct_client_profit(uid):
             note = (
                 f"Balance correction (single-client, scoped): recomputed under "
                 f"current profit formula (${DAILY_PROFIT_PER_100:.1f} per "
-                f"${PROFIT_BASIS_USD:.0f} of deposits minus withdrawals, whole "
-                f"$100 units only). Only this client's data was touched."
+                f"${PROFIT_BASIS_USD:.0f} of total deposits, whole $100 units "
+                f"only). Only this client's data was touched."
             )
             cur.execute(
                 "INSERT INTO transactions(id,user_id,account_id,type,method,amount_usd,"
@@ -2110,7 +2065,7 @@ def admin_correct_client_profit(uid):
             notif_msg = (
                 f"We've corrected how your daily trading profit is calculated: it's "
                 f"now ${DAILY_PROFIT_PER_100:.1f} per ${PROFIT_BASIS_USD:.0f} of your "
-                f"deposits minus withdrawals (whole $100 units only). As part of this "
+                f"total deposits (whole $100 units only). As part of this "
                 f"correction your balance has been {direction} by ${abs(delta):,.2f}. "
                 f"Your new balance is ${result['new_balance']:,.2f}. See your "
                 f"Transactions tab for the full adjustment record."
@@ -2142,19 +2097,14 @@ def admin_migrate_flat_profit():
 
     Recomputes EVERY client's ENTIRE historical daily_trade_log under the
     CURRENT profit formula, as if that formula had always been in effect.
-    Because this platform's formula has changed multiple times (v5.11,
-    v5.16, v5.19, v5.21, v5.23, v5.24...), a client's early days were very
-    likely credited under a DIFFERENT, legitimate formula at the time —
-    this endpoint has no awareness of that and will overwrite those rows
-    too, not just the ones that were actually wrong. Applying this against
-    the whole client base at once can (and has) produced large, unwanted
-    balance swings for long-tenured clients whose history spans several
-    formula changes.
+    Because this platform's formula has changed multiple times, a client's
+    early days were very likely credited under a DIFFERENT, legitimate
+    formula at the time — this endpoint has no awareness of that and will
+    overwrite those rows too, not just the ones that were actually wrong.
 
-    Kept only for reference / rare full-platform resets where you
-    genuinely want every client's whole history recomputed under today's
-    rate. For "this one client's balance looks wrong," use the scoped
-    single-client endpoint instead.
+    Kept only for reference / rare full-platform resets. For "this one
+    client's balance looks wrong," use the scoped single-client endpoint
+    instead.
 
     Dry run by default (shows what WOULD change); pass {"apply": true} to
     actually correct balances and daily_trade_log rows, and notify each
@@ -2185,15 +2135,9 @@ def admin_migrate_flat_profit():
         )
         deposits = cur.fetchone()["s"]
 
-        cur.execute(
-            "SELECT COALESCE(SUM(amount_usd),0) AS s FROM transactions "
-            "WHERE user_id=%s AND type='WITHDRAWAL' AND status='COMPLETED'", (uid,)
-        )
-        principal_withdrawals = cur.fetchone()["s"]
-
-        # Profit basis is deposits minus completed principal withdrawals,
-        # floored at $0 (v5.24) — matches the live trade engine.
-        total_deposit = max(0.0, deposits - principal_withdrawals)
+        # CHANGE v5.27: profit basis is GROSS TOTAL DEPOSITS ONLY —
+        # withdrawals no longer reduce it.
+        total_deposit = deposits
 
         cur.execute(
             "SELECT id, profit FROM daily_trade_log WHERE user_id=%s ORDER BY date", (uid,)
@@ -2211,8 +2155,8 @@ def admin_migrate_flat_profit():
         if total_deposit < MIN_BALANCE or days_traded == 0:
             flat_daily = 0.0
         else:
-            # Only whole $100 units of (deposits - withdrawals) count
-            # (matches the live formula's floor behavior).
+            # Only whole $100 units of total deposits count (matches the
+            # live formula's floor behavior).
             flat_daily = round(math.floor(total_deposit / PROFIT_BASIS_USD) * DAILY_PROFIT_PER_100, 2)
 
         correct_total_profit = round(flat_daily * days_traded, 2)
@@ -2354,7 +2298,7 @@ def scheduler_status():
         "next_run_utc":      next_run.isoformat(),
         "hours_until_run":   hours_left,
         "daily_profit_rate": DAILY_PROFIT_PER_100,
-        "profit_basis":      f"${DAILY_PROFIT_PER_100:.1f} per ${PROFIT_BASIS_USD:.0f} of (deposits - withdrawals), whole $100 units only, non-compounding",
+        "profit_basis":      f"${DAILY_PROFIT_PER_100:.1f} per ${PROFIT_BASIS_USD:.0f} of total deposits (withdrawals do not reduce it), whole $100 units only, non-compounding",
         "profit_basis_usd":  PROFIT_BASIS_USD,
         "min_balance":       MIN_BALANCE,
         "symbol":            TRADE_SYMBOL,
@@ -2366,12 +2310,12 @@ start_scheduler()
 
 if __name__ == "__main__":
     print("\n" + "="*60)
-    print("   Summit Wealth v5.23 — $4.5 PROFIT PER $100 OF TOTAL DEPOSITS")
+    print("   Summit Wealth v5.27 — $4.5 PROFIT PER $100 OF TOTAL DEPOSITS")
     print("="*60)
     print(f"   URL    : http://127.0.0.1:8080")
     print(f"   Client : john@test.com  / demo1234")
     print(f"   Admin  : admin@test.com / admin1234")
-    print(f"   Rate   : ${DAILY_PROFIT_PER_100} per ${PROFIT_BASIS_USD:.0f} of (deposits - withdrawals)/day (whole $100 units only) at {TRADE_HOUR:02d}:00 UTC ({TRADE_HOUR+3:02d}:00 EAT)")
+    print(f"   Rate   : ${DAILY_PROFIT_PER_100} per ${PROFIT_BASIS_USD:.0f} of total deposits/day (whole $100 units only, withdrawals do not reduce it) at {TRADE_HOUR:02d}:00 UTC ({TRADE_HOUR+3:02d}:00 EAT)")
     print(f"   Eligible min total deposit: ${MIN_BALANCE:.0f}")
     print(f"   Symbol : {TRADE_SYMBOL}")
     print(f"   Min Dep: $100  |  Min Withdrawal: $10  |  Ref Withdrawal: $16")
